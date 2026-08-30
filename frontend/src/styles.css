@@ -54,4 +54,19 @@ button:disabled { opacity:.38; cursor:not-allowed; transform:none!important; }
 .result small { color:var(--quiet); }
 .standard-field { display:block; margin:40px 0 18px; }
 .standard-field input { width:100%; background:var(--shell); color:var(--ink); border:1px solid var(--line); padding:18px; outline:none; font:18px ui-monospace,monospace; }
+select { width:100%; background:var(--shell); color:var(--ink); border:1px solid var(--line); padding:18px; outline:none; }
+.header-actions { justify-self:end; display:flex; align-items:center; gap:10px; }
+.compact { padding:8px 12px; }
+.wallet-chip { border:1px solid var(--line); background:none; color:var(--muted); padding:8px 10px; font:11px ui-monospace,monospace; cursor:pointer; }
+.state { color:var(--success); font:11px ui-monospace,monospace; letter-spacing:.1em; }
+.state-2 { color:var(--danger); }
+.card-heading { display:flex; justify-content:space-between; font:16px ui-monospace,monospace; }
+.countdown { font:24px Georgia,serif; }
+.asset-row { display:flex; justify-content:space-between; gap:14px; border-top:1px solid var(--line); padding:12px 0; color:var(--muted); font-size:12px; }
+.link-button { text-decoration:none; display:inline-block; }
+.beneficiary-sheet dl { display:grid; grid-template-columns:auto 1fr; gap:8px 20px; color:var(--muted); }
+.beneficiary-sheet dt { color:var(--quiet); }
+.ruled { display:grid; gap:34px; margin:26px 0; }
+.ruled span { border-bottom:1px solid var(--line); padding-bottom:22px; color:var(--quiet); font:11px ui-monospace,monospace; }
+@media print { header, .primary, .secondary, .eyebrow { display:none!important; } body { background:white; color:black; } .beneficiary-sheet { border:1px solid #222; } }
 @media (max-width:760px) { header { height:auto; min-height:72px; grid-template-columns:1fr auto; padding:12px 18px; } nav { grid-row:2; grid-column:1/-1; width:100%; justify-content:space-between; border-top:1px solid var(--line); margin-top:10px; padding-top:7px; } .network { font-size:8px; } .hero { min-height:auto; grid-template-columns:1fr; padding:75px 0; gap:25px; } .seal { transform:scale(.72); transform-origin:left center; height:190px; } .steps,.phrase-grid { grid-template-columns:1fr; } .steps article { border-right:0; border-bottom:1px solid var(--line); padding:30px 8px; } .status { flex-direction:column; gap:8px; padding-left:0; } .flow { padding-top:55px; } .wallet-row { align-items:flex-start; flex-direction:column; } .actions { flex-direction:column; align-items:stretch; } }

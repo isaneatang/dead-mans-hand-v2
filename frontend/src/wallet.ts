@@ -20,7 +20,7 @@ export async function connectTestnetWallet() {
     });
   } catch (error) {
     const code = (error as { code?: number }).code;
-    if (code !== 4902) throw error;
+    if (code !== 4902 && code !== -32603) throw error;
     await window.ethereum.request({
       method: "wallet_addEthereumChain",
       params: [
@@ -36,5 +36,7 @@ export async function connectTestnetWallet() {
   }
   const provider = new BrowserProvider(window.ethereum as Eip1193Provider);
   const signer = await provider.getSigner();
+  const network = await provider.getNetwork();
+  if (network.chainId !== 968n) throw new Error("Wallet is not on BOT Chain Testnet (968).");
   return { provider, signer, address: await signer.getAddress() };
 }
