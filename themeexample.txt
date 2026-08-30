@@ -1,5 +1,0 @@
-visit commonsmade.com for theme example
-
-if the app is going to contain drop down menu,take into consideration that drop down menu hardly works on walletbrowsers in metamask okx and the reat, but renders well in normal browsers
-
-also make sure to verify the flow works ,a nd proper navigation
