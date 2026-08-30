@@ -254,6 +254,11 @@ button:disabled { opacity: 0.4; cursor: not-allowed; transform: none !important;
 .asset-row a { color: var(--dmh-ink); }
 .asset-row small { display: block; margin-top: 5px; color: var(--dmh-quiet); font-size: 11px; line-height: 1.5; }
 .asset-actions { display: flex; align-items: center; gap: 8px; }
+.asset-row.selectable { cursor: pointer; }
+.asset-row.selectable:hover { color: var(--dmh-ink); }
+.scan-main { display: flex; align-items: flex-start; gap: 11px; }
+.scan-main input { width: 20px; height: 20px; margin: 2px 0 0; accent-color: var(--dmh-success); flex: 0 0 auto; }
+.scan-main span { color: var(--dmh-ink); font-size: 13px; }
 .tx-link { color: var(--dmh-success); font-family: ui-monospace, monospace; }
 
 /* notices */

@@ -17,6 +17,10 @@ JavaScript cannot guarantee physical RAM erasure. The frontend guarantee is that
 
 The claim UI may compare locally derived addresses with public registered signers. This reveals nothing unavailable to an offline attacker and is never emitted on-chain.
 
+## Asset Discovery Privacy
+
+The owner may opt in to "Scan my wallet for assets", which asks the public BOT explorer which tokens an address holds. This sends the owner address to a third party and therefore links that address to the browser session. It is never automatic, manual entry always remains available, and no phrase, private key, or signature is ever sent to the explorer.
+
 ## Contract Limits
 
 - Assets stay in the owner wallet, but approvals grant DMH conditional transfer authority and therefore expose assets to implementation risk.

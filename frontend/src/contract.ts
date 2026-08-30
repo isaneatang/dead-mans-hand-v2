@@ -2,6 +2,7 @@ import {
   Contract,
   Interface,
   JsonRpcProvider,
+  getAddress,
   id,
   type ContractRunner,
 } from "ethers";
@@ -101,6 +102,87 @@ export function explorerTx(hash: string) {
 export function explorerAddress(address: string) {
   return `${config.explorerUrl}/address/${address}`;
 }
+
+export type DiscoveredAsset = {
+  address: string;
+  name: string;
+  symbol: string;
+  decimals: number;
+  balance: bigint;
+  /** 0 = ERC-20, 1 = enumerable ERC-721, -1 = not sweepable by DMH. */
+  kind: number;
+  blocked?: string;
+};
+
+/* eslint-disable @typescript-eslint/no-explicit-any */
+/**
+ * Reads the wallet's token list from the public Blockscout explorer.
+ * Opt-in only: it sends the owner address to a third party, so it is never automatic.
+ * Never send phrases, keys or signatures here.
+ */
+export async function discoverAssets(owner: string): Promise<DiscoveredAsset[]> {
+  const response = await fetch(
+    `${config.explorerUrl}/api/v2/addresses/${owner}/token-balances`,
+    { headers: { accept: "application/json" } },
+  );
+  if (!response.ok) {
+    throw new Error("The explorer did not answer. Add asset addresses manually instead.");
+  }
+
+  const rows = (await response.json()) as any[];
+  const merged = new Map<string, DiscoveredAsset>();
+
+  for (const row of rows ?? []) {
+    const info = row?.token;
+    if (!info?.address) continue;
+    const address = getAddress(String(info.address));
+    const type = String(info.type ?? "").toUpperCase();
+    const existing = merged.get(address);
+    const balance = BigInt(row.value ?? "0");
+
+    if (existing) {
+      existing.balance += balance;
+      continue;
+    }
+
+    const asset: DiscoveredAsset = {
+      address,
+      name: String(info.name ?? "Unnamed asset"),
+      symbol: String(info.symbol ?? "?"),
+      decimals: Number(info.decimals ?? 18) || 0,
+      balance,
+      kind: type === "ERC-20" ? 0 : type === "ERC-721" ? 1 : -1,
+    };
+
+    if (asset.kind === -1) {
+      asset.blocked = type === "ERC-1155" ? "ERC-1155 is not supported" : `${type || "Unknown"} is not supported`;
+    }
+    merged.set(address, asset);
+  }
+
+  const assets = [...merged.values()];
+
+  // An ERC-721 collection can only be swept when it is enumerable.
+  await Promise.all(
+    assets
+      .filter((asset) => asset.kind === 1)
+      .map(async (asset) => {
+        const enumerable = await erc721(asset.address)
+          .supportsInterface(ERC721_ENUMERABLE_INTERFACE_ID)
+          .catch(() => false);
+        if (!enumerable) {
+          asset.kind = -1;
+          asset.blocked = "Collection is not enumerable";
+        }
+      }),
+  );
+
+  return assets
+    .filter((asset) => asset.balance > 0n)
+    .sort((a, b) => a.kind - b.kind || a.symbol.localeCompare(b.symbol));
+}
+/* eslint-enable @typescript-eslint/no-explicit-any */
+
 
 /** Contract error name to human sentence. Names come from the ABI, never hardcoded selectors. */
 const ERROR_TEXT: Record<string, string> = {

@@ -22,10 +22,12 @@ import {
   dmhInterface,
   erc20,
   erc721,
+  discoverAssets,
   explorerAddress,
   explorerTx,
   friendlyError,
   skipReason,
+  type DiscoveredAsset,
 } from "./contract";
 
 type Page = "home" | "create" | "dashboard" | "claim" | "inspect";
@@ -345,17 +347,20 @@ function AssetManager({
   wallet,
   vaultId,
   owner,
-  editable,
+  canRegister,
 }: {
   wallet: WalletState;
   vaultId: bigint;
   owner: string;
-  editable: boolean;
+  canRegister: boolean;
 }) {
   const [address, setAddress] = useState("");
+  const [manual, setManual] = useState(false);
   const [amountMode, setAmountMode] = useState<"balance" | "custom">("balance");
   const [amount, setAmount] = useState("1000");
   const [health, setHealth] = useState<AssetHealth[]>([]);
+  const [found, setFound] = useState<DiscoveredAsset[]>();
+  const [chosen, setChosen] = useState<Record<string, boolean>>({});
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState("");
 
@@ -372,7 +377,69 @@ function AssetManager({
     void refresh();
   }, [refresh]);
 
-  async function register() {
+  const registered = useMemo(
+    () => new Set(health.map((entry) => entry.token.toLowerCase())),
+    [health],
+  );
+
+  async function scan() {
+    setBusy(true);
+    setNotice("Asking the public explorer which assets this wallet holds…");
+    try {
+      const assets = await discoverAssets(owner);
+      setFound(assets);
+      setChosen({});
+      setNotice(
+        assets.length === 0
+          ? "No tokens were found for this wallet. You can still add an address manually."
+          : "",
+      );
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : friendlyError(error));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  /** Registers then approves one asset. Each asset needs two wallet confirmations. */
+  async function addAsset(target: string, kind: number, approveValue: bigint) {
+    await (await dmh(wallet.signer).addToken(vaultId, target, kind)).wait();
+    if (kind === 0) {
+      if (approveValue === 0n) return;
+      await (await erc20(target, wallet.signer).approve(DMH_ADDRESS, approveValue)).wait();
+    } else {
+      await (await erc721(target, wallet.signer).setApprovalForAll(DMH_ADDRESS, true)).wait();
+    }
+  }
+
+  async function addSelected() {
+    const queue = (found ?? []).filter(
+      (asset) => chosen[asset.address] && asset.kind !== -1 && !registered.has(asset.address.toLowerCase()),
+    );
+    if (queue.length === 0) return setNotice("Select at least one supported asset.");
+
+    setBusy(true);
+    try {
+      for (let index = 0; index < queue.length; index += 1) {
+        const asset = queue[index];
+        setNotice(
+          `Asset ${index + 1} of ${queue.length} (${asset.symbol}): confirm the two wallet prompts.`,
+        );
+        await addAsset(asset.address, asset.kind, asset.balance);
+      }
+      setNotice(`Registered and approved ${queue.length} asset${queue.length > 1 ? "s" : ""}.`);
+      setChosen({});
+      await refresh();
+      setFound(await discoverAssets(owner).catch(() => found ?? []));
+    } catch (error) {
+      setNotice(friendlyError(error));
+      await refresh();
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function registerManual() {
     if (!isAddress(address)) return setNotice("Enter a valid contract address.");
     setBusy(true);
     setNotice("Detecting the asset type…");
@@ -381,18 +448,16 @@ function AssetManager({
       let kind = -1;
       let decimals = 18;
 
-      const probe = erc721(target);
-      const enumerable = await probe
+      const enumerable = await erc721(target)
         .supportsInterface(ERC721_ENUMERABLE_INTERFACE_ID)
         .catch(() => false);
       if (enumerable) {
         kind = 1;
       } else {
-        const asToken = erc20(target);
-        const found = await asToken.decimals().catch(() => null);
-        if (found !== null) {
+        const found20 = await erc20(target).decimals().catch(() => null);
+        if (found20 !== null) {
           kind = 0;
-          decimals = Number(found);
+          decimals = Number(found20);
         }
       }
 
@@ -403,31 +468,14 @@ function AssetManager({
         return;
       }
 
-      setNotice("Confirm the registration transaction in your wallet.");
-      const addTx = await dmh(wallet.signer).addToken(vaultId, target, kind);
-      await addTx.wait();
-
-      setNotice("Registered. Now confirm the approval transaction.");
-      if (kind === 0) {
-        const contract = erc20(target, wallet.signer);
-        const value =
-          amountMode === "balance"
+      setNotice("Confirm the two wallet prompts: registration, then approval.");
+      const value =
+        kind === 0
+          ? amountMode === "balance"
             ? await erc20(target).balanceOf(owner)
-            : parseUnits(amount || "0", decimals);
-        if (value === 0n) {
-          setNotice("Registered, but the approval amount was zero. Approve an amount later.");
-          await refresh();
-          return;
-        }
-        const approveTx = await contract.approve(DMH_ADDRESS, value);
-        await approveTx.wait();
-      } else {
-        const approveTx = await erc721(target, wallet.signer).setApprovalForAll(
-          DMH_ADDRESS,
-          true,
-        );
-        await approveTx.wait();
-      }
+            : parseUnits(amount || "0", decimals)
+          : 0n;
+      await addAsset(target, kind, value);
 
       setAddress("");
       setNotice("Asset registered and approved.");
@@ -487,51 +535,122 @@ function AssetManager({
                 <span className={entry.ok ? "pill good" : "pill bad"}>
                   {entry.ok ? "ready" : "not sweepable"}
                 </span>
-                {editable && (
-                  <button className="ghost" disabled={busy} onClick={() => revoke(entry)}>
-                    Revoke
-                  </button>
-                )}
+                <button className="ghost" disabled={busy} onClick={() => revoke(entry)}>
+                  Revoke
+                </button>
               </div>
             </div>
           ))}
         </div>
       )}
 
-      {editable && (
+      {!canRegister ? (
+        <p className="muted">
+          This vault can no longer register assets. You can still revoke approvals above.
+        </p>
+      ) : (
         <>
-          <label className="standard-field">
-            <span>Asset contract address</span>
-            <input
-              value={address}
-              onChange={(event) => setAddress(event.target.value)}
-              placeholder="0x…"
-              autoComplete="off"
-              spellCheck={false}
-            />
-          </label>
-          <Segmented
-            label="ERC-20 approval amount"
-            value={amountMode}
-            onChange={setAmountMode}
-            options={[
-              { value: "balance", title: "Current balance", note: "recommended" },
-              { value: "custom", title: "Custom amount" },
-            ]}
-          />
-          {amountMode === "custom" && (
-            <label className="standard-field">
-              <span>Amount to approve</span>
-              <input
-                value={amount}
-                inputMode="decimal"
-                onChange={(event) => setAmount(event.target.value)}
-              />
-            </label>
+          <div className="actions">
+            <button className="secondary" disabled={busy} onClick={scan}>
+              {busy ? "Working…" : "Scan my wallet for assets"}
+            </button>
+            <button className="ghost" disabled={busy} onClick={() => setManual(!manual)}>
+              {manual ? "Hide manual entry" : "Add an address manually"}
+            </button>
+          </div>
+          <p className="muted">
+            Scanning asks the public BOT explorer which tokens this address holds. It reveals your
+            address to the explorer and never sends phrases or keys.
+          </p>
+
+          {found && found.length > 0 && (
+            <div className="asset-list">
+              {found.map((asset) => {
+                const already = registered.has(asset.address.toLowerCase());
+                const usable = asset.kind !== -1 && !already;
+                return (
+                  <label
+                    className={usable ? "asset-row selectable" : "asset-row"}
+                    key={asset.address}
+                  >
+                    <div className="scan-main">
+                      <input
+                        type="checkbox"
+                        disabled={!usable || busy}
+                        checked={Boolean(chosen[asset.address])}
+                        onChange={(event) =>
+                          setChosen({ ...chosen, [asset.address]: event.target.checked })
+                        }
+                      />
+                      <div>
+                        <span className="mono">
+                          {asset.symbol} · {asset.name}
+                        </span>
+                        <small>
+                          {asset.kind === 0
+                            ? `${formatUnits(asset.balance, asset.decimals)} held`
+                            : `${asset.balance} item${asset.balance === 1n ? "" : "s"} held`}
+                          {" · "}
+                          {short(asset.address)}
+                        </small>
+                      </div>
+                    </div>
+                    <span
+                      className={
+                        already ? "pill" : asset.kind === -1 ? "pill bad" : "pill good"
+                      }
+                    >
+                      {already ? "registered" : (asset.blocked ?? "can be added")}
+                    </span>
+                  </label>
+                );
+              })}
+              <button className="primary" disabled={busy} onClick={addSelected}>
+                {busy ? "Working…" : "Register and approve selected"}
+              </button>
+              <p className="muted">
+                Each asset needs two confirmations: one to register it, one to approve it.
+                ERC-20 approvals use the balance shown above.
+              </p>
+            </div>
           )}
-          <button className="primary" disabled={busy} onClick={register}>
-            {busy ? "Working…" : "Register and approve"}
-          </button>
+
+          {manual && (
+            <>
+              <label className="standard-field">
+                <span>Asset contract address</span>
+                <input
+                  value={address}
+                  onChange={(event) => setAddress(event.target.value)}
+                  placeholder="0x…"
+                  autoComplete="off"
+                  spellCheck={false}
+                />
+              </label>
+              <Segmented
+                label="ERC-20 approval amount"
+                value={amountMode}
+                onChange={setAmountMode}
+                options={[
+                  { value: "balance", title: "Current balance", note: "recommended" },
+                  { value: "custom", title: "Custom amount" },
+                ]}
+              />
+              {amountMode === "custom" && (
+                <label className="standard-field">
+                  <span>Amount to approve</span>
+                  <input
+                    value={amount}
+                    inputMode="decimal"
+                    onChange={(event) => setAmount(event.target.value)}
+                  />
+                </label>
+              )}
+              <button className="primary" disabled={busy} onClick={registerManual}>
+                {busy ? "Working…" : "Register and approve"}
+              </button>
+            </>
+          )}
         </>
       )}
       <Notice text={notice} />
@@ -735,7 +854,7 @@ function CreateVault({
               Open owner dashboard
             </button>
           </section>
-          <AssetManager wallet={wallet} vaultId={vaultId} owner={wallet.address} editable />
+          <AssetManager wallet={wallet} vaultId={vaultId} owner={wallet.address} canRegister />
           <BeneficiarySheet vaultId={vaultId} />
         </>
       )}
@@ -822,7 +941,7 @@ function VaultCard({ id, wallet }: { id: bigint; wallet: WalletState }) {
         wallet={wallet}
         vaultId={id}
         owner={vault.owner}
-        editable={vault.state === 0 || vault.state === 2}
+        canRegister={vault.state === 0}
       />
     </section>
   );
