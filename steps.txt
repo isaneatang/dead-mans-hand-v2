@@ -128,10 +128,11 @@ PART 3 - CREATE A TEST VAULT
 11. Never put either phrase into an explorer, transaction field, chat, email,
     screenshot, source file, browser storage, or GitHub repository.
 
-NOTE: The current frontend foundation derives the signers, but any unfinished
-wizard section must be completed before performing the entire create flow from
-the website. The contract itself is deployed and the scripted live cycle has
-already succeeded.
+NOTE: The website now performs the whole owner flow: derive signers, choose a
+period (presets or a custom length), create the vault on-chain, register and
+approve assets, view allowance health, ping, deactivate, revoke approvals, and
+print the beneficiary sheet. All selectors are buttons, not dropdowns, because
+dropdowns are unreliable inside wallet browsers.
 
 ================================================================================
 PART 4 - REGISTER AND APPROVE TEST ASSETS
@@ -311,12 +312,7 @@ PART 10 - BEFORE ANY PUBLIC RELEASE
 
 Do not represent the project as complete for real-value use until all are done:
 
-1. Finish the complete browser create wizard and on-chain transaction steps.
-2. Finish token registration, allowance health, and revocation UI.
-3. Finish owner dashboard and heartbeat UI.
-4. Finish beneficiary instruction sheet and printing.
-5. Finish the complete phrase-based claim and receipt-report UI.
-6. Test navigation and wallet prompts inside MetaMask and OKX mobile browsers.
+1. Test navigation and wallet prompts inside MetaMask and OKX mobile browsers.
 7. Deploy the static frontend to Cloudflare Pages or another static host.
 8. Perform browser-level end-to-end tests against BOT testnet.
 9. Publish a security disclosure contact.
