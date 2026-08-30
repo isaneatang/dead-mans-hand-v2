@@ -1,0 +1,33 @@
+{
+  "name": "dead-mans-hand-v2",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Non-custodial dual-phrase inheritance protocol for BOT Chain",
+  "scripts": {
+    "compile": "hardhat compile",
+    "test": "hardhat test",
+    "test:contracts": "hardhat test",
+    "dev": "vite --config frontend/vite.config.ts",
+    "build": "vite build --config frontend/vite.config.ts",
+    "typecheck": "tsc -p frontend/tsconfig.json",
+    "preview": "vite preview --config frontend/vite.config.ts",
+    "deploy:testnet": "hardhat run scripts/deploy.ts --network botTestnet",
+    "validate:testnet": "hardhat run scripts/live-cycle.ts --network botTestnet",
+    "clean": "hardhat clean"
+  },
+  "dependencies": {
+    "ethers": "6.17.0",
+    "react": "19.1.1",
+    "react-dom": "19.1.1"
+  },
+  "devDependencies": {
+    "@nomicfoundation/hardhat-toolbox": "6.1.0",
+    "@openzeppelin/contracts": "5.4.0",
+    "hardhat": "2.28.0",
+    "@types/react": "19.1.10",
+    "@types/react-dom": "19.1.7",
+    "@vitejs/plugin-react": "5.0.2",
+    "typescript": "5.9.2",
+    "vite": "7.1.3"
+  }
+}

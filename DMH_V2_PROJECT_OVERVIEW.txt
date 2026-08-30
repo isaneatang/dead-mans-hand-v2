@@ -1,0 +1,366 @@
+================================================================================
+DEAD MAN'S HAND v2 (DMH v2)
+A Decentralized Crypto Inheritance & Emergency-Access Protocol on BOT Chain
+================================================================================
+
+PROJECT OVERVIEW & PROBLEM STATEMENT
+Detailed explanation of what this project is, the problems it set out to
+solve, the flaws discovered along the way, and how each one was resolved.
+
+--------------------------------------------------------------------------------
+1. THE HUMAN PROBLEM
+--------------------------------------------------------------------------------
+
+Cryptocurrency has a death problem.
+
+When the holder of a crypto wallet dies, goes missing, becomes incapacitated,
+or simply loses access to their keys, their assets do not pass to their family
+the way a bank account does. There is no customer support line, no probate
+court order that a blockchain will obey, no "forgot password" link. The assets
+sit at an address forever, mathematically visible to everyone and practically
+reachable by no one. Industry estimates suggest millions of coins are already
+permanently stranded this way.
+
+The existing "solutions" all have fatal flaws:
+
+  a) WRITE YOUR SEED PHRASE DOWN AND GIVE IT TO SOMEONE
+     This gives that person full, immediate, irrevocable control of your
+     funds while you are still alive. It is not inheritance; it is a
+     handover. It also creates a single piece of paper whose theft equals
+     total loss.
+
+  b) CUSTODIAL SERVICES / EXCHANGES WITH BENEFICIARY FORMS
+     You must trust a company to still exist, remain honest, remain solvent,
+     and honor the arrangement decades from now. The entire point of
+     self-custody is defeated.
+
+  c) LAWYERS AND WILLS
+     A will can name a beneficiary, but it cannot move coins. If the keys
+     are lost, the will is a piece of paper describing money nobody can
+     touch. If the keys are IN the will, everyone in the probate chain can
+     read them.
+
+  d) SMART-CONTRACT LOCKUPS
+     Most on-chain inheritance tools require you to deposit your assets into
+     a contract today. Your funds are now locked, illiquid, and exposed to
+     that contract's bugs for years while you are still alive and using them.
+
+DMH v2 exists to solve this: a way for assets to pass to a chosen person
+after the owner goes silent, WITHOUT giving anyone power over the assets
+while the owner is alive, WITHOUT trusting any company or server, WITHOUT
+locking the assets up front, and WITHOUT the transfer mechanism itself
+leaking the secret that guards it.
+
+--------------------------------------------------------------------------------
+2. WHAT THE PROJECT IS
+--------------------------------------------------------------------------------
+
+DMH v2 is a "dead man's switch" smart-contract protocol deployed on BOT Chain
+(an EVM-compatible Layer 1; testnet chain ID 968, mainnet 677), plus a static
+web frontend and an optional Python verification CLI.
+
+The core mechanics:
+
+  1. REGISTER, DON'T DEPOSIT (non-custodial by design)
+     The owner creates a vault and registers tokens they already hold
+     (ERC-20 and enumerable ERC-721). Nothing moves. The only thing granted
+     is a standard token allowance (approve / setApprovalForAll) from the
+     owner's own wallet to the vault contract. The owner keeps full custody
+     and full use of every asset the entire time. The contract holds
+     permission, never possession.
+
+  2. PROVE YOU'RE ALIVE (the heartbeat)
+     The owner picks an inactivity period (minutes for demos, up to 10 years
+     for real use) and periodically calls ping() to reset the clock. As long
+     as pings keep arriving, the vault is inert. The contract is completely
+     passive — it does nothing on its own; it only answers when called.
+
+  3. GO SILENT, BECOME CLAIMABLE
+     If the inactivity period elapses with no ping, the vault becomes
+     claimable. Nothing happens automatically — a claimant must show up.
+
+  4. CLAIM WITH TWO SECRET PHRASES — WITHOUT EVER REVEALING THEM
+     At setup, the owner composed two independent, original, high-entropy
+     secret phrases (a self-written poem; a private kanji-and-translation
+     pairing; any Unicode text in any language). Each phrase is run through
+     a deliberately slow key-derivation function (PBKDF2-HMAC-SHA256,
+     600,000 iterations) LOCALLY IN THE BROWSER to deterministically derive
+     a private key. Only the two derived PUBLIC ADDRESSES were registered
+     on-chain. The phrases and keys never left the owner's device.
+
+     To claim, the beneficiary types the same two phrases. The frontend
+     re-derives the same two keys (deterministic: same phrase in, same key
+     out, forever, on any device). Each key signs a structured EIP-712
+     message that binds together: the vault ID, the destination address the
+     assets should go to, a one-time nonce, the chain ID, and the contract
+     address. Only the two SIGNATURES are broadcast. The contract verifies
+     both signatures against the two registered addresses via ecrecover,
+     confirms the inactivity gate has passed, and sweeps the registered
+     assets from the owner's wallet directly to the signed destination.
+
+  5. FRICTION AGAINST ABUSE
+     Every claim attempt costs a fee (in native BOT, forwarded instantly to
+     a fee recipient — the contract never holds value). Failed attempts
+     double the fee (capped) and put THAT CALLER on a self-expiring
+     cooldown. Failure responses are deliberately uniform — the contract
+     never reveals which of the two signatures was wrong.
+
+The result: the chain acts purely as a WITNESS. It witnesses that a
+commitment exists (two public addresses, a timer), and it verifies proofs
+(signatures) — but it never has custody of the secrets or of the assets,
+and nothing secret is ever transmitted through it.
+
+--------------------------------------------------------------------------------
+3. THE TECHNICAL PROBLEMS IT SOLVES (AND HOW EACH WAS DISCOVERED)
+--------------------------------------------------------------------------------
+
+This project's design is the product of iteratively attacking its own first
+version (DMH v1) until every discovered hole was closed. The problems below
+are listed in the order they were found.
+
+PROBLEM 1 — THE PLAINTEXT LEAK AT CLAIM TIME
+  v1 stored a salted hash of a secret phrase on-chain (safe), but its claim
+  function was attemptUnlock(vaultId, secretPlaintext) — the claimant had to
+  submit the RAW PHRASE so the contract could hash and compare it. Every
+  blockchain transaction, including its input data, is permanently public.
+  The moment anyone claimed — including the legitimate beneficiary — the
+  secret was burned into public transaction history forever. Even failed
+  guesses were published. The very act of honest, intended use destroyed the
+  secret at exactly the moment it mattered most.
+
+  Why "just hash it on the frontend first" doesn't fix it: hashing is
+  deterministic, so the submitted hash becomes a static, copyable password.
+  Anyone who sees it in a transaction can replay it. Moving the hashing
+  around just relocates the leak; it does not close it.
+
+  Why "lock the vault instantly on first match" doesn't fix it: the leak
+  happens at BROADCAST, not at execution. A transaction sits in the public
+  mempool, visible to every node and every bot, BEFORE any contract code
+  runs. No amount of fast contract logic can outrun information that already
+  left the sender's control at the network layer.
+
+  SOLUTION: never transmit the secret in any form. Prove knowledge of it
+  instead. Two candidate technologies were evaluated:
+
+    - ZK-PROOFS (prove "I know a value hashing to X" without revealing it):
+      cryptographically sound and keeps the memorable-phrase UX, but
+      requires custom circuits (Circom/Groth16), a circuit-unfriendly hash
+      swap (keccak256 -> Poseidon), and carries the well-documented
+      "under-constrained circuit" bug class — subtle circuit errors that
+      pass all tests yet accept forged proofs. Too heavy and too risky a
+      surface for this scope.
+
+    - PHRASE-DERIVED ECDSA SIGNATURES (chosen): derive a private key from
+      the phrase via a slow KDF; sign a claim message; the contract checks
+      the signature with ecrecover — the single most battle-tested primitive
+      in the EVM (it verifies every Ethereum transaction ever sent). Keeps
+      the memorable-phrase UX, uses decades-old proven math, and reduces the
+      custom-code risk to ordinary, testable software correctness.
+
+PROBLEM 2 — MEMPOOL FRONT-RUNNING
+  Blockchains order transactions by gas fee, not arrival time. Bots
+  ("generalized front-runners") scan the public mempool 24/7 for pending
+  transactions containing valid unlock data, copy the data, and resubmit it
+  with a higher fee so the validator executes THEIR copy first. Gas cost is
+  no deterrent: paying $2,000 in gas to steal a $50,000 vault is a trade any
+  attacker takes. There is no protocol-level fee ceiling and BOT Chain uses
+  a standard fee-priority mempool with no fair-ordering guarantee.
+
+  SOLUTION: make copied data worthless instead of trying to win the race.
+  The destination address is baked INSIDE the signed EIP-712 payload. If a
+  bot copies the two signatures and front-runs the transaction, the contract
+  still pays out ONLY to the destination that was signed — the attacker just
+  paid the gas for the beneficiary's claim. Front-running becomes not merely
+  difficult but economically pointless. (Side benefit: because authorization
+  comes entirely from the signatures and not from msg.sender, anyone can
+  submit the transaction — the derived addresses never need gas, and the
+  claim is relayer-friendly.)
+
+PROBLEM 3 — SIGNATURE REPLAY
+  A signature is static data. Without protection, a signature seen once
+  (e.g., in a partially-failed claim) could be resubmitted later.
+
+  SOLUTION: a per-vault monotonic nonce lives inside the signed payload and
+  is incremented by the contract on every executed claim, instantly
+  invalidating all previously issued signatures.
+
+PROBLEM 4 — CROSS-CHAIN / CROSS-CONTRACT REPLAY (found during prompt review)
+  The conversational design signed keccak256(vaultId, destination, nonce) —
+  with no chain ID and no contract address. Since this project launches on
+  testnet in preparation for mainnet, a user reusing the same phrases on
+  both networks could have a testnet signature replayed against the mainnet
+  vault. SOLUTION: full EIP-712 domain separation (name, version, chainId,
+  verifyingContract) in every digest — AND the chain ID is additionally
+  mixed into the KDF salt, so testnet and mainnet derive entirely different
+  keys from the same phrases. Two independent walls.
+
+PROBLEM 5 — OFFLINE BRUTE-FORCE OF THE SECRET
+  Everything on a public chain is visible: the vault, the owner, the two
+  registered addresses. Because key derivation is deterministic, an attacker
+  can guess phrases OFFLINE — derive a key per guess, compare the address —
+  millions of times per second, silently, without ever touching the contract
+  or triggering any fee or cooldown. On-chain friction cannot see this
+  attack at all. Low-entropy secrets (pet names, birthdays, famous quotes,
+  song lyrics, known poems) fall in seconds to hours because attackers build
+  dictionaries from exactly that kind of public, meaningful text — and in
+  an inheritance context the attacker may be someone who KNEW the owner,
+  making "personal" facts the FIRST guesses, not the last.
+
+  SOLUTION (layered, and honestly labeled as the one user-dependent layer):
+    - TWO independent, SELF-COMPOSED, original phrases required — never
+      optional single-phrase mode (users reliably choose convenience over
+      security when offered a weak path). Needing both correct multiplies
+      difficulty rather than adding it.
+    - A deliberately SLOW KDF (600k-iteration PBKDF2) instead of a raw fast
+      hash, cutting attacker guess rates by orders of magnitude.
+    - Full Unicode support so phrases can be poems, kanji, any language —
+      dramatically expanding the search space (and a genuine product
+      differentiator).
+    - Frontend entropy scoring, explicit warnings against personal facts
+      and known text, and guidance to store the two phrases in SEPARATE
+      places or with separate people — turning "two secrets" into true
+      risk diversification, not one long password split in half.
+  The honest limit, stated openly: no contract mechanism can save a weak
+  phrase from offline guessing. Entropy is the user's contribution; the
+  protocol maximizes the value of that entropy.
+
+PROBLEM 6 — SIDE-CHANNEL LEAK ("WHICH PHRASE WAS WRONG?")
+  If the contract or its events revealed that signature A verified but B
+  failed, an attacker could brute-force each phrase INDEPENDENTLY — roughly
+  square-rooting the total work and gutting the dual-phrase design.
+  SOLUTION: uniform failure. Both signatures are always evaluated; any
+  failure produces the identical event, identical fee escalation, identical
+  cooldown, and no distinguishing error. (The claim UI does perform a LOCAL
+  derived-address comparison to help a struggling legitimate claimant —
+  this is safe because the comparison uses only public data an offline
+  attacker already has; nothing extra is leaked on-chain.)
+
+PROBLEM 7 — GRIEFING / DENIAL OF SERVICE ON THE REAL BENEFICIARY
+  With signatures, on-chain guessing is useless to attackers — so v1's
+  vault-wide cooldown flipped from a defense into a WEAPON: an attacker
+  could spam garbage signatures the moment a vault became claimable, locking
+  out the legitimate beneficiary at exactly the moment they need access.
+  SOLUTION: the cooldown is PER-CALLER, not per-vault (one wallet's failures
+  never block another wallet), while the escalating fee — paid in native
+  BOT and consumed even on failure (the function returns rather than
+  reverting, so failed attempts cannot refund themselves) — keeps spam
+  costly.
+
+PROBLEM 8 — CUSTODY AND LOCKUP RISK
+  Solved structurally from v1 and preserved: assets never move at setup.
+  The owner grants a standard allowance to the contract; the contract
+  executes transferFrom only at verified claim time, sweeping directly from
+  the owner's wallet to the signed destination. Fees are forwarded the
+  moment they arrive. The contract's balance is zero at the end of every
+  transaction; there is nothing in it to steal, freeze, or exploit. There
+  is no admin key, no upgradeability, no backdoor — an upgradeable
+  inheritance vault would itself be a custody backdoor.
+
+PROBLEM 9 — REAL-WORLD MESSINESS OF TOKENS
+  One malicious or broken token must not brick an entire inheritance.
+  SOLUTION: skip-and-continue sweeping (each transfer in try/catch; failures
+  are logged as events and skipped), a bounded per-collection NFT sweep cap
+  to avoid exceeding block gas limits on huge collections, and repeatable
+  claims (with fresh signatures over the incremented nonce) so leftovers
+  are never stranded. Known, documented exclusions rather than silent
+  failures: native BOT (no approve mechanism exists for a chain's native
+  coin), ERC-1155 (roadmap), and non-enumerable ERC-721 collections.
+
+PROBLEM 10 — HUMAN-LANGUAGE FRAGILITY
+  Hashing and key derivation are byte-exact: one different space, line
+  break, or invisible Unicode encoding difference produces a completely
+  different key with zero partial credit — a beneficiary could hold the
+  "correct" phrase and still be locked out forever. Worse, identical-looking
+  text (especially kanji and accented characters) can be encoded as
+  different bytes by different keyboards and operating systems.
+  SOLUTION: mandatory NFC Unicode normalization at both setup and claim;
+  leading/trailing whitespace trimmed while internal formatting is preserved
+  as deliberate entropy; forced full re-typing confirmation of both phrases
+  at setup (catching drift immediately, not years later); and a frozen,
+  published cryptographic spec with shared test vectors that BOTH the
+  JavaScript frontend and the Python CLI must pass in CI — eliminating the
+  documented bug class where two implementations of the "same" derivation
+  silently diverge.
+
+--------------------------------------------------------------------------------
+4. WHAT THE PROJECT DELIBERATELY DOES NOT DO
+--------------------------------------------------------------------------------
+
+Honesty about scope is part of the design philosophy ("honest constrained
+MVP over overbuilt vaporware"):
+
+  - It does NOT hide the vault. On a public chain, the vault's existence,
+    owner address, registered tokens, and timer are visible to everyone,
+    permanently. True on-chain privacy would require a fundamentally
+    different (encrypted-state / ZK-native) architecture. What the design
+    protects is the only thing that NEEDS protecting: the secret itself,
+    which never touches the chain in any recoverable form. Pseudonymity
+    (fresh single-purpose wallets) covers the practical rest.
+
+  - It does NOT sweep native BOT. approve()/transferFrom() are ERC-20
+    functions; a chain's native coin has no contract to grant allowances
+    on. Documented exclusion, with wrapped-token workaround noted only if
+    a canonical wrapper exists.
+
+  - It does NOT run by itself. Smart contracts are passive; nothing fires
+    automatically when a timer expires. A claimant must show up. Keeper
+    automation is a documented roadmap item, not a hidden assumption.
+
+  - It does NOT offer recovery. Losing both phrases means permanent
+    lockout. No backdoor exists, because any backdoor is an attack surface.
+    The setup flow generates a printable beneficiary instruction sheet
+    (client-side, phrases never pre-filled) as the real-world mitigation
+    for the equally real risk that a beneficiary never learns the vault
+    exists.
+
+  - It does NOT claim to be audited. Its own documentation labels it
+    "reviewed design, unaudited implementation" and forbids real mainnet
+    value until an independent review occurs.
+
+--------------------------------------------------------------------------------
+5. DEPLOYMENT CONTEXT
+--------------------------------------------------------------------------------
+
+  Chain:        BOT Chain — EVM-compatible L1 (Geth-API compatible,
+                Parlia PoSA consensus, 0.75s blocks, fast finality)
+  Active:       TESTNET, chain ID 968
+                RPC https://rpc.bohr.life | Explorer https://scan.bohr.life
+                Faucet https://faucet.botchain.ai/basic
+  Prepared:     MAINNET, chain ID 677 — configured fail-closed (address
+                null; the app refuses to guess). Because the chain ID lives
+                in both the EIP-712 domain and the KDF salt, testnet vaults,
+                keys, and signatures are cryptographically unusable on
+                mainnet by construction; the mainnet switch is a clean
+                redeploy plus one config entry.
+  Stack:        Solidity ^0.8.24 + OpenZeppelin (EIP712, ECDSA,
+                ReentrancyGuard); static browser frontend (ethers v6,
+                WebCrypto PBKDF2, zxcvbn) with NO backend — a server that
+                could ever see a phrase would itself be the vulnerability;
+                narrow-scope Python CLI for independent offline
+                verification of the cryptography.
+  UI:           Calm, editorial, typography-led design (deep forest-black
+                and warm cream, serif phrase fields treating the phrase as
+                a personal artifact, soft salmon instead of harsh red for
+                failure states — a failed inheritance claim is a grief
+                moment, not a scolding), modeled on commonsmade.com.
+
+--------------------------------------------------------------------------------
+6. ONE-PARAGRAPH SUMMARY
+--------------------------------------------------------------------------------
+
+DMH v2 answers the question "how do my crypto assets reach the person I
+choose if I die, disappear, or lose my keys — without trusting anyone, moving
+anything up front, or ever exposing the secret that guards them?" It does so
+by inverting the naive design: instead of a vault that must HEAR your secret
+to open (burning it into public record forever the first time it is used),
+it registers two public addresses derived from two private, self-composed
+phrases, and opens only for a pair of one-time cryptographic signatures that
+prove knowledge of both phrases while revealing neither — bound to a specific
+destination, nonce, chain, and contract so that copying, replaying, or
+front-running them accomplishes nothing. The chain is the witness and the
+referee; it is never the keeper of the secret, and never the keeper of the
+funds.
+
+================================================================================
+END OF DOCUMENT
+================================================================================

@@ -1,0 +1,329 @@
+================================================================================
+DEAD MAN'S HAND v2 - USER AND TESTING STEPS
+================================================================================
+
+CURRENT STATUS
+--------------
+
+Network: BOT Chain Testnet
+Chain ID: 968
+RPC: https://rpc.bohr.life
+Explorer: https://scan.bohr.life
+Faucet: https://faucet.botchain.ai/basic
+
+DMH v2 contract:
+0x2560Ad3B98bbF47d6c1A5A36ebC557F8e3d64f00
+
+Test ERC-20 contract:
+0xB0C6A739fF2458d27e8C9B9A719CE1859FE0B47F
+
+Test ERC-721 contract:
+0x7F7044782e51221C88dCD131ff685D109D7Cb3Cd
+
+Claim fee receiver:
+0x3B81167efca849a04524172b1A678A424F2e7C84
+
+Base claim fee: 0.001 BOT
+
+IMPORTANT SECURITY WARNING
+--------------------------
+
+1. This is an unaudited TESTNET application. Do not approve real assets.
+2. The key in private.txt is exposed and must be treated as compromised.
+3. Never use that key on mainnet or reuse it for another wallet.
+4. Never commit private.txt, .env, or a private key to GitHub.
+5. Mainnet chain 677 is intentionally disabled.
+
+================================================================================
+PART 1 - START THE APPLICATION LOCALLY
+================================================================================
+
+1. Open a terminal in this project directory:
+
+   /home/isane/Documents/DONCODER/DMHv2
+
+2. Install dependencies if this is a fresh machine:
+
+   npm install
+
+3. Run the automated checks:
+
+   npm run typecheck
+   npm test
+   npm run build
+
+4. Start the development site:
+
+   npm run dev
+
+5. Open the local URL printed by Vite, normally:
+
+   http://localhost:5173
+
+6. Keep the terminal running while using the site.
+
+================================================================================
+PART 2 - PREPARE METAMASK OR ANOTHER INJECTED WALLET
+================================================================================
+
+1. Use a disposable TESTNET wallet. Do not use a mainnet wallet holding value.
+
+2. Connect it to the application. The application should offer to add or switch
+   to BOT Chain Testnet automatically.
+
+3. If the network must be added manually, enter:
+
+   Network name: BOT Chain Testnet
+   RPC URL: https://rpc.bohr.life
+   Chain ID: 968
+   Currency symbol: BOT
+   Explorer: https://scan.bohr.life
+
+4. Obtain test BOT from:
+
+   https://faucet.botchain.ai/basic
+
+5. Keep enough test BOT for vault creation, asset registration, approvals,
+   heartbeat transactions, claim gas, and the 0.001 BOT claim fee.
+
+================================================================================
+PART 3 - CREATE A TEST VAULT
+================================================================================
+
+1. Open the Create page and connect the owner wallet.
+
+2. Compose Phrase A. It must be original and at least 20 characters.
+
+3. Do NOT use:
+
+   - A famous poem, lyric, quote, proverb, or scripture
+   - A pet name, birthday, hometown, or other personal fact
+   - Text that has appeared online or in a message
+   - An existing wallet seed phrase
+
+4. Retype Phrase A manually. Paste is disabled in the confirmation field.
+
+5. Compose and manually confirm a different Phrase B.
+
+6. Keep the two phrases in separate physical locations or with separate trusted
+   people. Both phrases are required. Losing either phrase prevents claiming.
+
+7. Click Derive Public Signers. Derivation happens locally and may take several
+   seconds. Only the two public addresses and public vault salt may go on-chain.
+
+8. Choose an inactivity period. Use a short test period only for demonstrations.
+   Real inheritance periods should be selected carefully.
+
+9. Confirm the createVault transaction in the owner wallet.
+
+10. Record all of the following on the beneficiary instruction sheet:
+
+   - Vault ID
+   - DMH contract address
+   - BOT Chain testnet and chain ID 968
+   - Claim-page URL
+   - Exact written Phrase A
+   - Exact written Phrase B
+
+11. Never put either phrase into an explorer, transaction field, chat, email,
+    screenshot, source file, browser storage, or GitHub repository.
+
+NOTE: The current frontend foundation derives the signers, but any unfinished
+wizard section must be completed before performing the entire create flow from
+the website. The contract itself is deployed and the scripted live cycle has
+already succeeded.
+
+================================================================================
+PART 4 - REGISTER AND APPROVE TEST ASSETS
+================================================================================
+
+1. Add only assets you intentionally want the vault to sweep.
+
+2. Supported assets:
+
+   - ERC-20 tokens
+   - ERC-721 collections implementing ERC721Enumerable
+
+3. Unsupported assets:
+
+   - Native BOT
+   - ERC-1155 tokens
+   - Non-enumerable ERC-721 collections
+
+4. For an ERC-20, complete two separate transactions:
+
+   - Register its token address in DMH with addToken
+   - Approve the DMH contract for the chosen token amount
+
+5. Do not silently approve unlimited ERC-20 spending. Choose an explicit amount.
+
+6. For an ERC-721 collection, complete two separate transactions:
+
+   - Register the collection in DMH with addToken
+   - Call setApprovalForAll(DMH, true) on the NFT contract
+
+7. Confirm each transaction on the explorer and verify the allowance or operator
+approval is active.
+
+8. Remember that registration alone is not approval. Approval alone is not
+registration. Both are required.
+
+================================================================================
+PART 5 - KEEP THE VAULT ACTIVE
+================================================================================
+
+1. Connect the owner wallet periodically.
+
+2. Open the owner dashboard and call ping before the inactivity period expires.
+
+3. Confirm the Pinged transaction on the explorer.
+
+4. A smart contract does not run automatically. It only compares the stored
+heartbeat time with the current block time when someone calls it.
+
+5. If the owner no longer wants the vault, call deactivateVault.
+
+6. After deactivation, separately revoke every ERC-20 allowance and ERC-721
+operator approval. Deactivating DMH does not change token approvals by itself.
+
+================================================================================
+PART 6 - TEST A CLAIM
+================================================================================
+
+1. Wait until the inactivity period has fully expired.
+
+2. Open the Claim page and enter the vault ID.
+
+3. Verify that the displayed owner, contract address, chain ID, timer, and token
+registry are the expected values.
+
+4. Connect any funded testnet wallet to submit the transaction. It does not need
+to be either phrase-derived signer.
+
+5. Enter Phrase A and Phrase B exactly, including internal spaces, punctuation,
+capitalization, and line breaks.
+
+6. Choose the destination address that should receive the assets.
+
+7. Check the complete destination address carefully. The destination is signed,
+so it cannot be changed after signatures are generated.
+
+8. The frontend must read the current vault nonce immediately before signing.
+
+9. Both phrase-derived keys sign the same EIP-712 authorization locally.
+
+10. Submit attemptClaim with exactly the displayed fee. The initial fee is:
+
+    0.001 BOT
+
+11. Wait for confirmation and inspect the transaction receipt events.
+
+12. A blockchain receipt with status 1 is not by itself proof that authorization
+succeeded. Confirm one of these protocol events:
+
+    ClaimExecuted = successful claim
+    ClaimFailed = signatures were not accepted
+
+13. Verify ERC20Swept, ERC721Swept, TokenSkipped, and SweepLimitReached events.
+
+14. If NFTs remain because the 20-NFT claim cap was reached, read the new nonce,
+generate fresh signatures, and run another claim.
+
+15. Never reuse old signatures after a successful claim. The nonce has changed.
+
+================================================================================
+PART 7 - USE THE OFFLINE PYTHON VERIFIER
+================================================================================
+
+1. Create a Python environment:
+
+   python3 -m venv .venv
+
+2. Install the pinned CLI dependencies:
+
+   .venv/bin/pip install -r dmh-cli/requirements.txt
+
+3. Verify all shared vectors:
+
+   .venv/bin/python dmh-cli/dmh.py verify-vectors
+
+4. View derivation help:
+
+   .venv/bin/python dmh-cli/dmh.py derive --help
+
+5. View claim-signing help:
+
+   .venv/bin/python dmh-cli/dmh.py sign-claim --help
+
+6. The CLI has no network access. Public values such as owner, vault salt, nonce,
+contract address, chain ID, and destination must be supplied manually.
+
+7. Do not use --show-private-key unless there is a specific testing need. Never
+share or fund a phrase-derived signing address.
+
+================================================================================
+PART 8 - REPEAT THE AUTOMATED LIVE TEST
+================================================================================
+
+The existing live test creates another vault for its signer. Because DMH permits
+only one non-deactivated vault per owner, the already claimed vault must first be
+deactivated or a different disposable owner wallet must be used.
+
+To run the test with a suitable disposable owner:
+
+   DEPLOYER_PRIVATE_KEY=<TESTNET_ONLY_KEY> npm run validate:testnet
+
+The script will:
+
+1. Mint test ERC-20 and ERC-721 assets.
+2. Create a one-minute vault.
+3. Register both assets.
+4. Approve DMH.
+5. Wait for expiration.
+6. Sign with two disposable keys.
+7. Claim to the configured test receiver.
+8. Print all transaction hashes and final balances.
+
+Do not put the private key directly into shell history on a shared machine.
+
+================================================================================
+PART 9 - CHECK THE EXISTING VERIFIED LIVE TEST
+================================================================================
+
+Existing vault: 1
+Existing claim transaction:
+https://scan.bohr.life/tx/0x9d84dc2101f99359ef22b2f925e40c90f6c28d3c4114926ed4082285c8ff8a59
+
+Expected final state:
+
+1. Vault state is CLAIMED.
+2. Vault nonce is 1.
+3. Receiver owns 1,000 DTT.
+4. Receiver owns test NFT #1.
+5. Receiver received 0.001 BOT claim fee.
+6. DMH contract native BOT balance is zero from normal protocol flow.
+
+All deployment and lifecycle transaction links are also recorded in README.md.
+
+================================================================================
+PART 10 - BEFORE ANY PUBLIC RELEASE
+================================================================================
+
+Do not represent the project as complete for real-value use until all are done:
+
+1. Finish the complete browser create wizard and on-chain transaction steps.
+2. Finish token registration, allowance health, and revocation UI.
+3. Finish owner dashboard and heartbeat UI.
+4. Finish beneficiary instruction sheet and printing.
+5. Finish the complete phrase-based claim and receipt-report UI.
+6. Test navigation and wallet prompts inside MetaMask and OKX mobile browsers.
+7. Deploy the static frontend to Cloudflare Pages or another static host.
+8. Perform browser-level end-to-end tests against BOT testnet.
+9. Publish a security disclosure contact.
+10. Obtain an independent smart-contract security review.
+11. Keep mainnet disabled until review findings are resolved.
+12. Never reuse the private.txt deployer key for mainnet.
+
+================================================================================
+END OF STEPS
+================================================================================

@@ -1,0 +1,13 @@
+node_modules/
+artifacts/
+cache/
+typechain-types/
+coverage/
+dist/
+.env
+.env.*
+!.env.example
+private.txt
+__pycache__/
+*.pyc
+.venv/

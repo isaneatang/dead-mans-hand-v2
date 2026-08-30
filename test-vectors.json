@@ -1,0 +1,102 @@
+[
+  {
+    "name": "vector-1-ascii",
+    "phrase": "The lantern waits beyond the cedar gate",
+    "owner": "0x1111111111111111111111111111111111111111",
+    "slot": "A",
+    "chainId": 968,
+    "vaultSalt": "0x0101010101010101010101010101010101010101010101010101010101010101",
+    "expectedPrivateKey": "0x38c58c1c1cea2851b96f18b7080753331b48fa7c32ef11738ead06f3ae78a91a",
+    "expectedAddress": "0x9F2535889cf32e7cB273Fa9D8733543E5CCAA017"
+  },
+  {
+    "name": "vector-2-multiline",
+    "phrase": "First river line\nSecond river line",
+    "owner": "0x2222222222222222222222222222222222222222",
+    "slot": "B",
+    "chainId": 968,
+    "vaultSalt": "0x0202020202020202020202020202020202020202020202020202020202020202",
+    "expectedPrivateKey": "0x37eea5a02db043b4214eb248543c0eb790440917eb56ec3f854244dfd4b9fa5c",
+    "expectedAddress": "0x2A01Ac5baFcFDD01FAAFbEc875cDd39E0F9FD3d9"
+  },
+  {
+    "name": "vector-3-japanese",
+    "phrase": "森の奥で月が静かに眠る秘密",
+    "owner": "0x3333333333333333333333333333333333333333",
+    "slot": "A",
+    "chainId": 968,
+    "vaultSalt": "0x0303030303030303030303030303030303030303030303030303030303030303",
+    "expectedPrivateKey": "0x0691c3f8c503a3bd81c29a5ab62483635863fb551bcee0faf0ffaeee8b4c0d15",
+    "expectedAddress": "0x251f7BAe86aB886a35c64399779d566576c231D9"
+  },
+  {
+    "name": "vector-4-emoji",
+    "phrase": "星を数える夜 🔐 🌙",
+    "owner": "0x4444444444444444444444444444444444444444",
+    "slot": "B",
+    "chainId": 968,
+    "vaultSalt": "0x0404040404040404040404040404040404040404040404040404040404040404",
+    "expectedPrivateKey": "0x5f71837c677860eccf022e5cc11af4d5d6c3b6edbe69a8987b128c2d5d6201b1",
+    "expectedAddress": "0x6F240F0f59668B75302a6aC35F9eBa54B0fb0458"
+  },
+  {
+    "name": "vector-5-trim",
+    "phrase": "   Edges are quietly trimmed but not the middle   ",
+    "owner": "0x5555555555555555555555555555555555555555",
+    "slot": "A",
+    "chainId": 968,
+    "vaultSalt": "0x0505050505050505050505050505050505050505050505050505050505050505",
+    "expectedPrivateKey": "0x2b095cba28e8db7e024e270936a700fc662f8a36349f0569a51d32d72a7f866c",
+    "expectedAddress": "0xf5E667CFab64200084bdDdf1d12CBe503f39c114"
+  },
+  {
+    "name": "vector-6-nfd",
+    "phrase": "Café beneath an unfamiliar sky",
+    "owner": "0x6666666666666666666666666666666666666666",
+    "slot": "B",
+    "chainId": 968,
+    "vaultSalt": "0x0606060606060606060606060606060606060606060606060606060606060606",
+    "expectedPrivateKey": "0xae206fc70fdd5c33b5fe4bba6fc5a7e0d58904eecb1a891a51013b5031886fa5",
+    "expectedAddress": "0xa131569102F3377A58BD60Cc58a48B93313b3a39"
+  },
+  {
+    "name": "vector-7-mixed-script-mainnet",
+    "phrase": "Arabic سر بعيد and 日本語 together",
+    "owner": "0x7777777777777777777777777777777777777777",
+    "slot": "A",
+    "chainId": 677,
+    "vaultSalt": "0x0707070707070707070707070707070707070707070707070707070707070707",
+    "expectedPrivateKey": "0xe093b18c6a82014ae201fa0af25f7f18f623fc4546c9433382e3329ef4fbd73d",
+    "expectedAddress": "0xE3E4c6F0a9d26DF6022DA1ed6B170aE0809077ab"
+  },
+  {
+    "name": "vector-8-mainnet",
+    "phrase": "A private sentence no archive has held before",
+    "owner": "0x8888888888888888888888888888888888888888",
+    "slot": "B",
+    "chainId": 677,
+    "vaultSalt": "0x0808080808080808080808080808080808080808080808080808080808080808",
+    "expectedPrivateKey": "0x89ec7f293bf6b51118272a1fc0dbef5e75ac20b4a7c1dcd87b48b70fd8aa4908",
+    "expectedAddress": "0xeeD2a8B0585863E339F01697b349802B66ADe0BF"
+  },
+  {
+    "name": "vector-9-internal-whitespace",
+    "phrase": "Line one has two  spaces\n\nLine four remains",
+    "owner": "0x9999999999999999999999999999999999999999",
+    "slot": "A",
+    "chainId": 968,
+    "vaultSalt": "0x0909090909090909090909090909090909090909090909090909090909090909",
+    "expectedPrivateKey": "0xd29356625ffba900df1be0b3a511bf3b0175d0aeac272473d1f88df55fa9dea0",
+    "expectedAddress": "0xf27d8A1321784F9be4431342F12254F24631905B"
+  },
+  {
+    "name": "vector-10-long",
+    "phrase": "Long private verse Long private verse Long private verse Long private verse Long private verse Long private verse Long private verse Long private verse Long private verse Long private verse Long private verse Long private verse Long private verse Long private verse Long private verse Long private verse Long private verse Long private verse Long private verse Long private verse Long private verse Long private verse Long private verse Long private verse Long private verse Long private verse Long private verse Long private verse ",
+    "owner": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "slot": "B",
+    "chainId": 677,
+    "vaultSalt": "0x0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
+    "expectedPrivateKey": "0xa6f8f3025cf7ea4324c0b89fb5721c9170deb648a01532ce024ff8fffa3f3042",
+    "expectedAddress": "0xB131888c1924A2ad8Bbcb3FB2f86e697575FD602"
+  }
+]
