@@ -1,0 +1,227 @@
+================================================================================
+DEAD MAN'S HAND v2 - SECURITY REVIEW SUGGESTIONS
+================================================================================
+
+Source reviewed: contracts/DeadMansHandV2.sol (517 lines)
+Deployed at:     0x2560Ad3B98bbF47d6c1A5A36ebC557F8e3d64f00 (BOT testnet 968)
+Review type:     Manual code review by an AI assistant.
+                 This is NOT a professional audit and must not be treated as one.
+
+--------------------------------------------------------------------------------
+VERDICT
+--------------------------------------------------------------------------------
+
+No flaw was found that lets an attacker steal assets without knowing both
+phrases. The core authorization logic is sound.
+
+The issues below are availability, griefing, and deployment-trust problems,
+plus one user-dependent risk that is the easiest real way to lose funds.
+
+--------------------------------------------------------------------------------
+WHAT IS ALREADY CORRECT (verified by reading each code path)
+--------------------------------------------------------------------------------
+
+1. ECDSA.tryRecover rejects malleable high-s signatures and never returns a
+   usable address(0) on failure.                        (line 354)
+2. signerA == signerB and owner-as-signer are rejected at creation, so one
+   phrase can never satisfy both slots.                 (line 142)
+3. The destination address is inside the signed EIP-712 digest, so copying
+   signatures from the mempool cannot redirect assets.  (line 350)
+4. Nonce increment and state change happen BEFORE any external call, and
+   nonReentrant is applied.                             (line 259)
+5. Only the vault owner can register tokens, so an attacker cannot inject a
+   hostile token into someone else's vault.
+6. A mismatched TokenType fails safely and is skipped instead of reverting.
+7. No admin key, no proxy, no upgrade path, no setter for feeRecipient or
+   baseClaimFee. No privileged path into vault flow exists.
+8. No receive() or fallback(), and msg.value must equal the fee exactly, so
+   the contract cannot silently accumulate value.
+
+--------------------------------------------------------------------------------
+MEDIUM SEVERITY
+--------------------------------------------------------------------------------
+
+M1 - A HOSTILE REGISTERED TOKEN CAN PERMANENTLY BLOCK AN INHERITANCE
+
+    Where: _sweep, _sweepERC20, _sweepERC721   (lines 316, 389, 445, 468)
+
+    _sweep iterates every registered token in one transaction. Each call
+    copies returndata into memory:
+
+        (bool success, bytes memory result) = token.call{gas: ...}(...)
+
+    A malicious token can expand memory inside its own gas budget and return
+    a very large blob. The returndatacopy cost is then paid by DMH from gas
+    OUTSIDE the inner gas limit. This is a "return bomb" and amplifies cost
+    by roughly 1-2x per token.
+
+    With the 50-token cap this is an estimated 9-16M gas, which usually still
+    fits in a block, so it is not an instant break.
+
+    The real danger is narrower and worse: an UPGRADEABLE token that is benign
+    at registration and hostile later. At claim time the owner is by
+    definition absent, and only the owner can call removeToken. There is no
+    way to claim a subset of tokens, so the beneficiary can be locked out
+    permanently.
+
+    SUGGESTED FIX:
+      - Bound the copied returndata with assembly, using returndatacopy of at
+        most 32-64 bytes, instead of using "bytes memory".
+      - Or add an optional token index range parameter to attemptClaim so a
+        beneficiary can sweep around a poisoned entry.
+
+
+M2 - FRONT-RUNNER CAN CHARGE THE BENEFICIARY A FEE AND A COOLDOWN
+
+    Where: attemptClaim failure path            (lines 248-257)
+
+    If an attacker copies a pending claim and lands first, the assets still
+    go to the correct signed destination. But the beneficiary's own
+    transaction then arrives with a stale nonce, fails signature validation,
+    and takes the failure path:
+
+        callerFailedAttempts[...]++;
+        callerCooldownUntil[...] = block.timestamp + COOLDOWN_DURATION;
+        _forwardFee(...);   // fee consumed
+        emit ClaimFailed(...);
+        return;             // deliberately not a revert
+
+    The beneficiary loses the fee and is locked out for one hour, with a
+    doubled fee on the next attempt. No theft occurs, so severity is limited,
+    but it is real harassment at exactly the worst moment.
+
+    SUGGESTED FIX:
+      - Revert instead of charging when both signatures are valid for a
+        PREVIOUS nonce, since that proves the caller is legitimate.
+      - Keep the frontend nonce re-check, which reduces but does not
+        eliminate the race.
+
+
+M3 - A CLAIMED VAULT CAN NEVER BE RE-SECURED BY PINGING
+
+    Where: ping / _activeOwnerVault / isClaimable  (lines 212, 501, 278)
+
+    ping requires ACTIVE state, but a successful claim sets CLAIMED, and
+    isClaimable only excludes DEACTIVATED. Therefore after any claim:
+
+      - The vault stays permanently claimable.
+      - Any NEWLY received tokens in still-approved contracts can be swept
+        immediately, with no new waiting period.
+      - The owner cannot restore protection with a heartbeat.
+
+    If a claim ever executes while the owner is actually alive, for example
+    because they forgot to ping, their only remedy is deactivateVault plus
+    manually revoking every token approval.
+
+    SUGGESTED FIX:
+      - State this far more prominently in the UI and SECURITY.md.
+      - Consider allowing ping on a CLAIMED vault to return it to ACTIVE,
+        but only if that behaviour is deliberately reviewed first, because it
+        changes the leftover-sweep guarantee.
+
+
+M4 - FORCED NATIVE BOT IS PERMANENTLY STUCK
+
+    There is no receive(), but native value can still be forced in through
+    selfdestruct or block rewards, and there is no rescue function.
+
+    Nobody can steal it, but nobody can retrieve it either. This is minor and
+    is arguably the correct tradeoff for having no admin key. Document it
+    rather than adding a privileged withdrawal function.
+
+--------------------------------------------------------------------------------
+LOW SEVERITY AND HARDENING
+--------------------------------------------------------------------------------
+
+L1 - FEE SHIFT OVERFLOW
+     Where: currentClaimFee                      (line 274)
+     baseClaimFee << doublings does not revert on overflow in Solidity 0.8.
+     The deployed value of 1e15 is completely safe. An absurd deployment
+     value could wrap silently.
+     FIX: add a constructor bound on baseClaimFee.
+
+L2 - TRANSFER GAS MAY BE TOO LOW
+     Where: TRANSFER_CALL_GAS = 150_000          (lines 389, 445)
+     This can be tight for safeTransferFrom into a contract destination that
+     runs onERC721Received logic. The result is a spurious skip, not a loss,
+     and the claim can be re-run with fresh signatures.
+     FIX: raise the per-transfer budget, or make it a constructor parameter.
+
+L3 - FEE RECIPIENT MUST ACCEPT NATIVE BOT
+     Where: _forwardFee                          (line 497)
+     _forwardFee reverts on failure. The current recipient is an EOA, so this
+     is fine. A contract recipient that rejects value would break every claim
+     permanently and irreversibly, with no way to fix it because the address
+     is immutable.
+     FIX: keep using an EOA, and test the recipient before any redeploy.
+
+--------------------------------------------------------------------------------
+THE ACTUAL BIGGEST RISK
+--------------------------------------------------------------------------------
+
+None of the findings above is the easiest way to lose funds. This is:
+
+    WEAK OR GUESSABLE PHRASES.
+
+Because both signer addresses are public and derivation is deterministic, an
+attacker can test candidate phrases entirely offline. No transactions, no
+fees, no cooldowns, and completely invisible to the contract. They then simply
+wait for the inactivity period to elapse.
+
+Two points make this sharper than it first sounds:
+
+  1. The two phrases give ADDITIVE, not multiplicative, offline resistance,
+     because each public signer address can be attacked independently.
+     Project documentation that claims multiplicative difficulty is wrong.
+
+  2. There is no dispute or veto window. Once phrases leak, the only defense
+     is to deactivate the vault and revoke approvals before the timer expires.
+
+PBKDF2 at 600,000 iterations buys margin. It cannot rescue a phrase that
+appears in any book, lyric, quote, post, or message, or that relates to
+your life in a guessable way.
+
+--------------------------------------------------------------------------------
+ALSO WORTH STATING PLAINLY
+--------------------------------------------------------------------------------
+
+Approving DMH is not risk-free. The contract does not hold your assets, but it
+does hold AUTHORITY TO MOVE THEM. It is unaudited.
+
+Correct posture remains: testnet only, no real value, and an independent
+professional security review before any mainnet deployment.
+
+--------------------------------------------------------------------------------
+RECOMMENDED PRIORITY ORDER
+--------------------------------------------------------------------------------
+
+1. Bound returndata in the sweep helpers.            (fixes M1)
+2. Decide and implement the stale-nonce behaviour.   (fixes M2)
+3. Document M3 loudly in the UI and SECURITY.md.
+4. Add a constructor sanity bound on baseClaimFee.   (fixes L1)
+5. Review the transfer gas budget.                   (addresses L2)
+
+IMPORTANT: M1, M2, L1 and L2 all require a REDEPLOY, because the contract is
+intentionally immutable and has no upgrade path. Deploying a new contract
+means:
+
+  - A new contract address.
+  - New EIP-712 domain separator, so old signatures stop working.
+  - Existing vaults stay on the old contract.
+  - Users must create fresh vaults and re-approve assets.
+
+--------------------------------------------------------------------------------
+NOT RECOMMENDED
+--------------------------------------------------------------------------------
+
+  - Do NOT add an admin key or upgrade proxy to fix these. An upgradeable
+    inheritance vault is itself a custody backdoor and would be a larger
+    security regression than every finding in this document combined.
+  - Do NOT add a fee-recipient setter for convenience. Immutability here is
+    a security property.
+  - Do NOT weaken the uniform failure path to report which signature failed.
+    That would create the side channel the design deliberately avoids.
+
+================================================================================
+END OF SUGGESTIONS
+================================================================================
