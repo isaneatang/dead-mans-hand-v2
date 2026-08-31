@@ -9,9 +9,12 @@ import {
 import {
   connectWallet,
   eagerWallet,
+  listWallets,
+  onWalletsChanged,
   switchNetwork,
   watchWallet,
   TESTNET_CHAIN_ID,
+  type WalletInfo,
   type WalletState,
 } from "./wallet";
 import {
@@ -1508,6 +1511,8 @@ export function App() {
   const [wallet, setWallet] = useState<WalletState>();
   const [walletNotice, setWalletNotice] = useState("");
   const [connecting, setConnecting] = useState(false);
+  const [wallets, setWallets] = useState<WalletInfo[]>([]);
+  const [picking, setPicking] = useState(false);
 
   const refreshWallet = useCallback(async () => {
     setWallet(await eagerWallet());
@@ -1518,19 +1523,40 @@ export function App() {
     return watchWallet(() => void refreshWallet());
   }, [refreshWallet]);
 
+  // Extensions announce themselves asynchronously, so the list grows after mount.
+  useEffect(() => {
+    const sync = () => setWallets(listWallets());
+    sync();
+    const stop = onWalletsChanged(sync);
+    const poll = window.setInterval(sync, 500);
+    const settle = window.setTimeout(() => window.clearInterval(poll), 4000);
+    return () => {
+      stop();
+      window.clearInterval(poll);
+      window.clearTimeout(settle);
+    };
+  }, []);
+
   const ready = Boolean(wallet && wallet.chainId === TESTNET_CHAIN_ID);
   const wrongNetwork = Boolean(wallet && wallet.chainId !== TESTNET_CHAIN_ID);
 
-  async function connect() {
+  async function connect(rdns?: string) {
+    setPicking(false);
     setConnecting(true);
     setWalletNotice("");
     try {
-      setWallet(await connectWallet());
+      setWallet(await connectWallet(rdns));
     } catch (error) {
       setWalletNotice(error instanceof Error ? error.message : friendlyError(error));
     } finally {
       setConnecting(false);
     }
+  }
+
+  function onConnectClick() {
+    // With two or more wallets installed, guessing one is a bug, not a shortcut.
+    if (wallets.length > 1) return setPicking((open) => !open);
+    void connect(wallets[0]?.rdns);
   }
 
   async function fixNetwork() {
@@ -1574,9 +1600,32 @@ export function App() {
               {short(wallet.address)}
             </a>
           ) : (
-            <button className="secondary compact" disabled={connecting} onClick={connect}>
-              {connecting ? "Connecting…" : "Connect"}
-            </button>
+            <div className="wallet-picker">
+              <button
+                className="secondary compact"
+                disabled={connecting}
+                aria-haspopup={wallets.length > 1 ? "menu" : undefined}
+                aria-expanded={wallets.length > 1 ? picking : undefined}
+                onClick={onConnectClick}
+              >
+                {connecting ? "Connecting…" : "Connect"}
+              </button>
+              {picking && wallets.length > 1 && (
+                <div className="wallet-menu" role="menu">
+                  <p className="wallet-menu-title">Choose a wallet</p>
+                  {wallets.map((entry) => (
+                    <button
+                      key={entry.rdns}
+                      role="menuitem"
+                      onClick={() => void connect(entry.rdns)}
+                    >
+                      {entry.icon && <img src={entry.icon} alt="" width={18} height={18} />}
+                      <span>{entry.name}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
           )}
         </div>
       </header>

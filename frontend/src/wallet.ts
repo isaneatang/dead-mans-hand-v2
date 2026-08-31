@@ -14,13 +14,34 @@ type Listener = (...args: unknown[]) => void;
 type InjectedProvider = Eip1193Provider & {
   providers?: InjectedProvider[];
   isMetaMask?: boolean;
+  isRabby?: boolean;
+  isCoinbaseWallet?: boolean;
+  isTrust?: boolean;
+  isTrustWallet?: boolean;
+  isOkxWallet?: boolean;
+  isBraveWallet?: boolean;
+  isFrame?: boolean;
   on?: (event: string, handler: Listener) => void;
   removeListener?: (event: string, handler: Listener) => void;
 };
 
+/** EIP-6963 wallet metadata. `rdns` is the stable, spoof-resistant identifier. */
+export type WalletInfo = {
+  uuid: string;
+  name: string;
+  /** Data URI supplied by the wallet, or "" for legacy providers. */
+  icon: string;
+  rdns: string;
+};
+
+type ProviderDetail = { info: WalletInfo; provider: InjectedProvider };
+
 declare global {
   interface Window {
     ethereum?: InjectedProvider;
+  }
+  interface WindowEventMap {
+    "eip6963:announceProvider": CustomEvent<ProviderDetail>;
   }
 }
 
@@ -33,40 +54,197 @@ export type WalletState = {
 
 export class WalletError extends Error {}
 
-function pickProvider(): InjectedProvider | undefined {
-  const injected = window.ethereum;
-  if (!injected) return undefined;
-  // Several wallets can inject at once. Prefer MetaMask, else the first entry.
-  if (Array.isArray(injected.providers) && injected.providers.length > 0) {
-    return injected.providers.find((p) => p.isMetaMask) ?? injected.providers[0];
+/* --------------------------- wallet discovery ---------------------------- */
+/*
+ * Two discovery mechanisms exist and both are required.
+ *
+ * 1. EIP-6963 (`eip6963:announceProvider`). This is how current browser
+ *    extensions publish themselves. Several of them no longer write
+ *    `window.ethereum` at all, and when two extensions are installed only one
+ *    can own that single slot, so `window.ethereum` alone silently misses or
+ *    misidentifies extension wallets.
+ * 2. Legacy `window.ethereum`. Mobile wallet in-app browsers inject straight
+ *    into the page and mostly do not announce over EIP-6963.
+ *
+ * Announced providers always take precedence; a legacy entry is only surfaced
+ * when that exact provider object was not announced.
+ */
+
+const LEGACY_RDNS = "legacy.injected";
+const SELECTED_KEY = "dmh.wallet.rdns";
+
+const announced = new Map<string, ProviderDetail>();
+const watchers = new Set<() => void>();
+let discovering = false;
+let selected: ProviderDetail | undefined;
+
+function notify(): void {
+  for (const watcher of [...watchers]) watcher();
+}
+
+function subscribe(watcher: () => void): () => void {
+  watchers.add(watcher);
+  return () => {
+    watchers.delete(watcher);
+  };
+}
+
+function onAnnounce(event: CustomEvent<ProviderDetail>): void {
+  const detail = event.detail;
+  const rdns = detail?.info?.rdns;
+  if (!detail?.provider || !rdns) return;
+  // Wallets re-announce on every request. Only a genuinely new provider is news.
+  if (announced.get(rdns)?.provider === detail.provider) return;
+  announced.set(rdns, {
+    info: {
+      uuid: String(detail.info.uuid ?? rdns),
+      name: String(detail.info.name ?? rdns),
+      icon: typeof detail.info.icon === "string" ? detail.info.icon : "",
+      rdns,
+    },
+    provider: detail.provider,
+  });
+  notify();
+}
+
+/** Asks every EIP-6963 wallet to announce itself. Safe to repeat. */
+export function requestProviders(): void {
+  if (typeof window === "undefined") return;
+  window.dispatchEvent(new Event("eip6963:requestProvider"));
+}
+
+function startDiscovery(): void {
+  if (discovering || typeof window === "undefined") return;
+  discovering = true;
+  window.addEventListener("eip6963:announceProvider", onAnnounce);
+  // Legacy signal for wallets that inject after first paint.
+  window.addEventListener("ethereum#initialized", notify, { once: true });
+  requestProviders();
+}
+
+function legacyName(provider: InjectedProvider): string {
+  // Checked most specific first: almost every wallet also sets isMetaMask.
+  if (provider.isRabby) return "Rabby";
+  if (provider.isCoinbaseWallet) return "Coinbase Wallet";
+  if (provider.isTrust || provider.isTrustWallet) return "Trust Wallet";
+  if (provider.isOkxWallet) return "OKX Wallet";
+  if (provider.isBraveWallet) return "Brave Wallet";
+  if (provider.isFrame) return "Frame";
+  if (provider.isMetaMask) return "MetaMask";
+  return "Injected wallet";
+}
+
+function legacyProviders(): InjectedProvider[] {
+  const root = typeof window === "undefined" ? undefined : window.ethereum;
+  if (!root) return [];
+  // `providers` is the pre-EIP-6963 multi-wallet array. Keep the root last.
+  const nested = Array.isArray(root.providers) ? root.providers.filter(Boolean) : [];
+  return nested.length > 0 ? [...nested, root] : [root];
+}
+
+function allDetails(): ProviderDetail[] {
+  const details = [...announced.values()];
+  const seen = new Set<InjectedProvider>(details.map((detail) => detail.provider));
+
+  legacyProviders().forEach((provider, index) => {
+    if (seen.has(provider)) return;
+    seen.add(provider);
+    const rdns = index === 0 ? LEGACY_RDNS : `${LEGACY_RDNS}.${index}`;
+    details.push({ info: { uuid: rdns, name: legacyName(provider), icon: "", rdns }, provider });
+  });
+
+  return details;
+}
+
+/** Discovered wallets. Recomputed on every call because extensions load late. */
+export function listWallets(): WalletInfo[] {
+  startDiscovery();
+  return allDetails().map((detail) => detail.info);
+}
+
+export function selectedWallet(): WalletInfo | undefined {
+  return selected?.info;
+}
+
+/** Fires when the discovered wallet list or the selected wallet changes. */
+export function onWalletsChanged(watcher: () => void): () => void {
+  startDiscovery();
+  return subscribe(watcher);
+}
+
+function remember(rdns: string): void {
+  // Only a public wallet identifier, never a phrase, key or address. Session
+  // scoped so nothing about this browser survives the tab.
+  try {
+    sessionStorage.setItem(SELECTED_KEY, rdns);
+  } catch {
+    // Storage can be blocked; the choice simply is not remembered.
   }
-  return injected;
+}
+
+function remembered(): string | undefined {
+  try {
+    return sessionStorage.getItem(SELECTED_KEY) ?? undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function select(detail: ProviderDetail): void {
+  if (selected?.provider === detail.provider && selected.info.rdns === detail.info.rdns) return;
+  selected = detail;
+  remember(detail.info.rdns);
+  notify();
 }
 
 /**
- * Wallet in-app browsers sometimes inject the provider after first paint.
- * Waits briefly instead of failing immediately.
+ * Waits briefly for at least one wallet. Extensions and wallet in-app browsers
+ * both inject asynchronously, so failing on the first tick reports "no wallet"
+ * for wallets that are merely a few hundred milliseconds late.
  */
-async function waitForProvider(timeoutMs: number): Promise<InjectedProvider | undefined> {
-  const immediate = pickProvider();
-  if (immediate) return immediate;
+async function waitForWallets(timeoutMs: number): Promise<ProviderDetail[]> {
+  startDiscovery();
+  const immediate = allDetails();
+  if (immediate.length > 0) return immediate;
 
   return new Promise((resolve) => {
     const started = Date.now();
-    const finish = (value?: InjectedProvider) => {
-      window.removeEventListener("ethereum#initialized", onInit);
-      clearInterval(poll);
+    let poll = 0;
+    let unsubscribe = () => {};
+    const stop = (value: ProviderDetail[]) => {
+      window.clearInterval(poll);
+      unsubscribe();
       resolve(value);
     };
-    const onInit = () => finish(pickProvider());
-    const poll = setInterval(() => {
-      const found = pickProvider();
-      if (found) return finish(found);
-      if (Date.now() - started >= timeoutMs) finish(undefined);
-    }, 150);
-    window.addEventListener("ethereum#initialized", onInit, { once: true });
+
+    unsubscribe = subscribe(() => {
+      const found = allDetails();
+      if (found.length > 0) stop(found);
+    });
+
+    poll = window.setInterval(() => {
+      const found = allDetails();
+      if (found.length > 0) return stop(found);
+      if (Date.now() - started >= timeoutMs) return stop([]);
+      requestProviders();
+    }, 250);
   });
 }
+
+function preferredOrder(details: ProviderDetail[]): ProviderDetail[] {
+  const preferred = remembered();
+  if (!preferred) return details;
+  return [
+    ...details.filter((detail) => detail.info.rdns === preferred),
+    ...details.filter((detail) => detail.info.rdns !== preferred),
+  ];
+}
+
+const NO_WALLET_MESSAGE =
+  "No wallet was detected. Install a wallet extension and reload, or open this page inside a wallet browser. " +
+  "If an extension is installed but never appears, check that the page is served over HTTPS and that the extension is enabled for this site.";
+
+/* ------------------------------- network -------------------------------- */
 
 async function readChainId(injected: InjectedProvider): Promise<number> {
   const hex = (await injected.request({ method: "eth_chainId" })) as string;
@@ -125,6 +303,8 @@ export async function ensureTestnet(injected: InjectedProvider): Promise<number>
   return readChainId(injected);
 }
 
+/* ----------------------------- connection ------------------------------- */
+
 async function buildState(injected: InjectedProvider): Promise<WalletState> {
   const provider = new BrowserProvider(injected, "any");
   const signer = await provider.getSigner();
@@ -136,57 +316,94 @@ async function buildState(injected: InjectedProvider): Promise<WalletState> {
   };
 }
 
-export async function connectWallet(): Promise<WalletState> {
-  const injected = await waitForProvider(2500);
-  if (!injected) {
-    throw new WalletError(
-      "No wallet was detected. Open this page inside MetaMask, OKX, or another wallet browser, or install a wallet extension.",
-    );
-  }
+/** Connects a specific discovered wallet, or the best available one. */
+export async function connectWallet(rdns?: string): Promise<WalletState> {
+  const details = await waitForWallets(3000);
+  if (details.length === 0) throw new WalletError(NO_WALLET_MESSAGE);
+
+  const target = rdns
+    ? details.find((detail) => detail.info.rdns === rdns)
+    : preferredOrder(details)[0];
+  if (!target) throw new WalletError("That wallet is no longer available. Reload and try again.");
 
   try {
-    await injected.request({ method: "eth_requestAccounts" });
+    await target.provider.request({ method: "eth_requestAccounts" });
   } catch (error) {
-    const { code } = error as { code?: number };
+    const { code, message } = error as { code?: number; message?: string };
     if (code === 4001) throw new WalletError("The wallet connection was cancelled.");
-    if (code === -32002) {
+    if (code === -32002 || /already (processing|pending)/i.test(message ?? "")) {
       throw new WalletError("A wallet request is already open. Finish it in your wallet, then retry.");
     }
-    throw new WalletError("The wallet refused the connection request.");
+    if (code === 4900 || code === 4901) {
+      throw new WalletError(`${target.info.name} is locked or disconnected. Unlock it, then retry.`);
+    }
+    throw new WalletError(`${target.info.name} refused the connection request.`);
   }
 
-  const chainId = await ensureTestnet(injected);
-  const state = await buildState(injected);
+  select(target);
+  const chainId = await ensureTestnet(target.provider);
+  const state = await buildState(target.provider);
   return { ...state, chainId };
 }
 
-/** Reconnects silently when the wallet already granted access. Never prompts. */
+/** Reconnects silently when a wallet already granted access. Never prompts. */
 export async function eagerWallet(): Promise<WalletState | undefined> {
-  const injected = await waitForProvider(1200);
-  if (!injected) return undefined;
-  try {
-    const accounts = (await injected.request({ method: "eth_accounts" })) as string[];
-    if (!accounts?.length) return undefined;
-    return await buildState(injected);
-  } catch {
-    return undefined;
+  const details = await waitForWallets(1500);
+  if (details.length === 0) return undefined;
+
+  for (const detail of preferredOrder(details)) {
+    try {
+      const accounts = (await detail.provider.request({ method: "eth_accounts" })) as string[];
+      if (!accounts?.length) continue;
+      select(detail);
+      return await buildState(detail.provider);
+    } catch {
+      // Locked or unreachable wallet; try the next one.
+    }
   }
+  return undefined;
 }
 
 export async function switchNetwork(): Promise<number> {
-  const injected = pickProvider();
-  if (!injected) throw new WalletError("No wallet was detected.");
-  return ensureTestnet(injected);
+  const provider = selected?.provider;
+  if (!provider) throw new WalletError("No wallet is connected.");
+  return ensureTestnet(provider);
 }
 
+/**
+ * Reacts to account and chain changes on the selected wallet, and rebinds when
+ * the selection changes or a wallet is discovered after mount.
+ */
 export function watchWallet(onChange: () => void): () => void {
-  const injected = pickProvider();
-  if (!injected?.on || !injected.removeListener) return () => {};
+  startDiscovery();
   const handler: Listener = () => onChange();
-  injected.on("accountsChanged", handler);
-  injected.on("chainChanged", handler);
+  let bound: InjectedProvider | undefined;
+
+  const unbind = () => {
+    bound?.removeListener?.("accountsChanged", handler);
+    bound?.removeListener?.("chainChanged", handler);
+    bound = undefined;
+  };
+
+  const bind = () => {
+    const provider = selected?.provider;
+    if (provider === bound) return false;
+    unbind();
+    bound = provider;
+    bound?.on?.("accountsChanged", handler);
+    bound?.on?.("chainChanged", handler);
+    return true;
+  };
+
+  bind();
+  const unsubscribe = subscribe(() => {
+    // Only re-read the wallet when the binding actually moved, otherwise a
+    // discovery announcement would loop back into another eager reconnect.
+    if (bind()) onChange();
+  });
+
   return () => {
-    injected.removeListener?.("accountsChanged", handler);
-    injected.removeListener?.("chainChanged", handler);
+    unsubscribe();
+    unbind();
   };
 }

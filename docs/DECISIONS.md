@@ -50,5 +50,16 @@ This document resolves conflicts in the original build prompt. It is normative f
 - Runtime JavaScript and fonts are bundled and self-hosted. No CDN scripts, analytics, or third-party code run on phrase-entry pages.
 - A restrictive Content Security Policy is required.
 - Production serves CSP as an HTTP response header because `frame-ancestors` is ignored in an HTML meta policy. The bundled frontend does not require `unsafe-inline` or `unsafe-eval`.
+- The policy is duplicated in `frontend/index.html`, `frontend/public/_headers`, and `frontend/vite.config.ts`. Browsers enforce every received policy independently, so all three must change together.
+- `script-src` allows `chrome-extension:`, `moz-extension:`, and `safari-web-extension:`. Extension wallets inject their inpage provider as a script element with an extension-scheme URL, and the page CSP applies to it. This is the minimum allowance that makes extension wallets usable; `unsafe-inline` and `unsafe-eval` are not substitutes for it and stay excluded.
 - Phrases and derived keys are never logged, transmitted, or persisted. JavaScript cannot guarantee physical RAM zeroing, and documentation must say so.
 - Private-key derivation, public-address derivation, and EIP-712 signing stay inside the crypto worker. The main UI receives only public addresses and signatures.
+
+## Wallet Discovery
+
+- Wallets are found through EIP-6963 announcements first, with `window.ethereum` (including the legacy `providers` array) as a fallback for wallet in-app browsers that do not announce. A provider already announced is never listed twice.
+- `window.ethereum` alone is insufficient: a single slot cannot hold two extensions, and several extensions no longer write it at all.
+- Provider flags such as `isMetaMask` are set by unrelated wallets and are used only to label legacy fallback entries, never to choose between wallets.
+- When more than one wallet is discovered the user chooses. Silent selection is treated as a bug.
+- One selected provider is shared by connect, network switching, and account/chain subscriptions, and subscriptions rebind when the selection changes or a wallet appears after mount.
+- Discovery waits a bounded interval rather than failing on the first tick, because both extensions and wallet in-app browsers inject asynchronously.

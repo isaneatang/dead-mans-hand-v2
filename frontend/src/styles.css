@@ -76,6 +76,44 @@ nav button.active, nav button:hover { color: var(--dmh-ink); }
   display: inline-flex;
   align-items: center;
 }
+.wallet-picker { position: relative; }
+.wallet-menu {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 20;
+  min-width: 208px;
+  padding: 8px;
+  border: 1px solid var(--dmh-line);
+  background: rgba(17, 23, 19, 0.99);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.wallet-menu-title {
+  margin: 4px 6px 6px;
+  color: var(--dmh-quiet);
+  text-transform: uppercase;
+  font: 10px ui-monospace, monospace;
+  letter-spacing: 0.14em;
+}
+.wallet-menu button {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 10px;
+  min-height: 42px;
+  border: 0;
+  background: none;
+  color: var(--dmh-muted);
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+  transition: color 0.25s var(--ease), background 0.25s var(--ease);
+}
+.wallet-menu button:hover { color: var(--dmh-ink); background: rgba(255, 255, 255, 0.05); }
+.wallet-menu img { border-radius: 4px; flex: 0 0 auto; }
 
 /* banners */
 .banner {

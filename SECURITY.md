@@ -19,6 +19,14 @@ The claim UI compares both locally derived addresses with both public registered
 
 The HTML meta policy is a fallback, not the complete deployment control. Production hosting MUST send the same CSP as an HTTP response header and include `frame-ancestors 'none'`; browsers ignore `frame-ancestors` in a meta policy. The policy intentionally excludes `unsafe-inline` and `unsafe-eval`. `frontend/public/_headers` supplies CSP and related headers for hosts that support the Cloudflare Pages/Netlify headers format; other hosts must install equivalent response-header configuration.
 
+Every CSP a browser receives is enforced independently and the effective policy is their intersection. The same policy therefore exists in three places that must be changed together: `frontend/index.html`, `frontend/public/_headers`, and the dev-server headers in `frontend/vite.config.ts`. Relaxing only one of them has no effect.
+
+`script-src` deliberately lists `chrome-extension:`, `moz-extension:`, and `safari-web-extension:`. A wallet extension exposes `window.ethereum` by appending `<script src="chrome-extension://<id>/inpage.js">` to the page, and that request is validated against this page's `script-src` even though the extension's own content script is not. Without those schemes every such wallet is silently blocked. The allowance only lets already-installed extensions load their own resources, so it does not widen what this origin or a network attacker can execute, and it is not a substitute for `unsafe-inline` or `unsafe-eval`, which remain excluded and would not have fixed this.
+
+## Wallet Connection
+
+Wallets are discovered through EIP-6963 announcements plus a legacy `window.ethereum` fallback. Announced providers take precedence. When more than one wallet is present the UI asks which to use instead of guessing, because `isMetaMask` is set by many unrelated wallets and cannot be trusted for identification. Only the chosen wallet's public `rdns` identifier is kept, in `sessionStorage`, so the choice survives a reload but nothing about the browser persists beyond the tab. No phrase, key, address, or signature is ever stored.
+
 ## Asset Discovery Privacy
 
 The owner may opt in to "Scan my wallet for assets", which asks the public BOT explorer which tokens an address holds. This sends the owner address to a third party and therefore links that address to the browser session. It is never automatic, manual entry always remains available, and no phrase, private key, or signature is ever sent to the explorer.

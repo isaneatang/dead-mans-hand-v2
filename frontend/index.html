@@ -3,9 +3,22 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!--
+      Fallback policy only. Production must send the same policy as an HTTP
+      response header; `frame-ancestors` is ignored in a meta policy.
+
+      script-src must list the browser-extension schemes. A wallet extension
+      publishes window.ethereum by appending a script element whose src is
+      chrome-extension://<id>/inpage.js to this page, and that request is
+      checked against this page's script-src. Without the scheme the
+      extension is blocked and never appears, while mobile wallet in-app
+      browsers still work because they inject natively. 'unsafe-inline' and
+      'unsafe-eval' do not help here and stay excluded: neither one whitelists
+      a URL scheme.
+    -->
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; script-src 'self'; style-src 'self'; font-src 'self'; img-src 'self' data:; connect-src 'self' https://rpc.bohr.life https://scan.bohr.life; worker-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'"
+      content="default-src 'self'; script-src 'self' chrome-extension: moz-extension: safari-web-extension:; style-src 'self'; font-src 'self'; img-src 'self' data:; connect-src 'self' https://rpc.bohr.life https://scan.bohr.life; worker-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'"
     />
     <meta name="referrer" content="no-referrer" />
     <meta name="theme-color" content="#111713" />
