@@ -11,6 +11,10 @@ async function main() {
     throw new Error(`Deployment is testnet-only; connected chain is ${network.chainId}`);
   }
 
+  if ((await ethers.provider.getCode(feeRecipient)) !== "0x") {
+    throw new Error("FEE_RECIPIENT must be an EOA that accepts native BOT");
+  }
+
   const [deployer] = await ethers.getSigners();
   const baseClaimFee = ethers.parseEther("0.001");
   const factory = await ethers.getContractFactory("DeadMansHandV2");

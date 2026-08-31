@@ -54,6 +54,8 @@ contract DeadMansHandV2 is EIP712, ReentrancyGuard {
     uint64 public constant MAX_INACTIVITY_PERIOD = 3650 days;
     uint32 public constant MAX_FEE_DOUBLINGS = 7;
     uint64 public constant COOLDOWN_DURATION = 1 hours;
+    uint64 public constant STALE_SIGNATURE_GRACE_PERIOD = 5 minutes;
+    uint256 public constant MAX_BASE_CLAIM_FEE = type(uint256).max >> MAX_FEE_DOUBLINGS;
 
     uint256 private constant READ_CALL_GAS = 40_000;
     uint256 private constant TRANSFER_CALL_GAS = 150_000;
@@ -79,6 +81,7 @@ contract DeadMansHandV2 is EIP712, ReentrancyGuard {
     mapping(address owner => uint256 vaultId) public liveVaultOf;
     mapping(uint256 vaultId => mapping(address caller => uint32 count)) public callerFailedAttempts;
     mapping(uint256 vaultId => mapping(address caller => uint64 until)) public callerCooldownUntil;
+    mapping(uint256 vaultId => uint64 timestamp) private _lastSuccessfulClaimAt;
     mapping(uint256 vaultId => mapping(address token => bool registered)) private _tokenRegistered;
 
     error VaultNotFound();
@@ -98,6 +101,8 @@ contract DeadMansHandV2 is EIP712, ReentrancyGuard {
     error InvalidVaultSalt();
     error LiveVaultAlreadyExists();
     error FeeForwardFailed();
+    error InvalidBaseClaimFee();
+    error StaleClaimSignatures();
 
     event VaultCreated(
         uint256 indexed vaultId,
@@ -128,6 +133,7 @@ contract DeadMansHandV2 is EIP712, ReentrancyGuard {
         EIP712("DeadMansHandV2", "2")
     {
         if (feeRecipient_ == address(0)) revert InvalidDestination();
+        if (baseClaimFee_ > MAX_BASE_CLAIM_FEE) revert InvalidBaseClaimFee();
         baseClaimFee = baseClaimFee_;
         feeRecipient = feeRecipient_;
     }
@@ -246,6 +252,22 @@ contract DeadMansHandV2 is EIP712, ReentrancyGuard {
         if (msg.value != fee) revert IncorrectFee();
 
         if (!_signaturesValid(vaultId, destination, vault, sigA, sigB)) {
+            // Recognize only the immediately preceding nonce as a legitimate race.
+            if (
+                vault.nonce > 0
+                    && block.timestamp
+                        <= uint256(_lastSuccessfulClaimAt[vaultId]) + STALE_SIGNATURE_GRACE_PERIOD
+                    && _signaturesValidForNonce(
+                        vaultId,
+                        destination,
+                        vault.signerA,
+                        vault.signerB,
+                        vault.nonce - 1,
+                        sigA,
+                        sigB
+                    )
+            ) revert StaleClaimSignatures();
+
             uint32 failures = callerFailedAttempts[vaultId][msg.sender];
             if (failures < type(uint32).max) {
                 callerFailedAttempts[vaultId][msg.sender] = failures + 1;
@@ -258,6 +280,7 @@ contract DeadMansHandV2 is EIP712, ReentrancyGuard {
 
         ++vault.nonce;
         vault.state = VaultState.CLAIMED;
+        _lastSuccessfulClaimAt[vaultId] = uint64(block.timestamp);
         callerFailedAttempts[vaultId][msg.sender] = 0;
         callerCooldownUntil[vaultId][msg.sender] = 0;
 
@@ -347,14 +370,28 @@ contract DeadMansHandV2 is EIP712, ReentrancyGuard {
         bytes calldata sigA,
         bytes calldata sigB
     ) private view returns (bool) {
+        return _signaturesValidForNonce(
+            vaultId, destination, vault.signerA, vault.signerB, vault.nonce, sigA, sigB
+        );
+    }
+
+    function _signaturesValidForNonce(
+        uint256 vaultId,
+        address destination,
+        address signerA,
+        address signerB,
+        uint256 nonce,
+        bytes calldata sigA,
+        bytes calldata sigB
+    ) private view returns (bool) {
         bytes32 structHash = keccak256(
-            abi.encode(CLAIM_TYPEHASH, vaultId, destination, vault.nonce)
+            abi.encode(CLAIM_TYPEHASH, vaultId, destination, nonce)
         );
         bytes32 digest = _hashTypedDataV4(structHash);
         (address recoveredA, ECDSA.RecoverError errorA,) = ECDSA.tryRecover(digest, sigA);
         (address recoveredB, ECDSA.RecoverError errorB,) = ECDSA.tryRecover(digest, sigB);
-        return errorA == ECDSA.RecoverError.NoError && recoveredA == vault.signerA
-            && errorB == ECDSA.RecoverError.NoError && recoveredB == vault.signerB;
+        return errorA == ECDSA.RecoverError.NoError && recoveredA == signerA
+            && errorB == ECDSA.RecoverError.NoError && recoveredB == signerB;
     }
 
     function _sweepERC20(
@@ -386,7 +423,7 @@ contract DeadMansHandV2 is EIP712, ReentrancyGuard {
         uint256 amount = balance < allowance ? balance : allowance;
         if (amount == 0) return;
 
-        (bool success, bytes memory result) = token.call{gas: TRANSFER_CALL_GAS}(
+        (bool success,) = token.call{gas: TRANSFER_CALL_GAS}(
             abi.encodeWithSelector(
                 bytes4(keccak256("transferFrom(address,address,uint256)")),
                 owner,
@@ -394,7 +431,7 @@ contract DeadMansHandV2 is EIP712, ReentrancyGuard {
                 amount
             )
         );
-        if (!success || !_optionalBooleanSucceeded(result)) {
+        if (!success || !_optionalBooleanSucceeded()) {
             emit TokenSkipped(vaultId, token, REASON_TRANSFER_FAILED);
             return;
         }
@@ -464,28 +501,44 @@ contract DeadMansHandV2 is EIP712, ReentrancyGuard {
         return transferred;
     }
 
-    function _readUint(address target, bytes memory data) private view returns (bool, uint256) {
-        (bool success, bytes memory result) = target.staticcall{gas: READ_CALL_GAS}(data);
-        if (!success || result.length < 32) return (false, 0);
-        return (true, abi.decode(result, (uint256)));
+    function _readUint(address target, bytes memory data) private view returns (bool, uint256 value) {
+        (bool success,) = target.staticcall{gas: READ_CALL_GAS}(data);
+        if (!success || _returndataSize() < 32) return (false, 0);
+        assembly ("memory-safe") {
+            returndatacopy(0, 0, 32)
+            value := mload(0)
+        }
+        return (true, value);
     }
 
     function _readBool(address target, bytes memory data) private view returns (bool, bool) {
-        (bool success, bytes memory result) = target.staticcall{gas: READ_CALL_GAS}(data);
-        if (!success || result.length < 32) return (false, false);
-        uint256 value = abi.decode(result, (uint256));
+        (bool success,) = target.staticcall{gas: READ_CALL_GAS}(data);
+        if (!success || _returndataSize() < 32) return (false, false);
+        uint256 value;
+        assembly ("memory-safe") {
+            returndatacopy(0, 0, 32)
+            value := mload(0)
+        }
         if (value > 1) return (false, false);
         return (true, value == 1);
     }
 
-    function _optionalBooleanSucceeded(bytes memory result) private pure returns (bool) {
-        if (result.length == 0) return true;
-        if (result.length < 32) return false;
+    function _optionalBooleanSucceeded() private pure returns (bool succeeded) {
+        uint256 size = _returndataSize();
+        if (size == 0) return true;
+        if (size < 32) return false;
         uint256 value;
         assembly ("memory-safe") {
-            value := mload(add(result, 0x20))
+            returndatacopy(0, 0, 32)
+            value := mload(0)
         }
         return value == 1;
+    }
+
+    function _returndataSize() private pure returns (uint256 size) {
+        assembly ("memory-safe") {
+            size := returndatasize()
+        }
     }
 
     function _forwardFee(uint256 vaultId, address caller, uint256 fee) private {

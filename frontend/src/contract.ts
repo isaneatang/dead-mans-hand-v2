@@ -58,6 +58,8 @@ export const DMH_ABI = [
   "error InvalidVaultSalt()",
   "error LiveVaultAlreadyExists()",
   "error FeeForwardFailed()",
+  "error InvalidBaseClaimFee()",
+  "error StaleClaimSignatures()",
 ];
 
 export const ERC20_ABI = [
@@ -207,6 +209,8 @@ const ERROR_TEXT: Record<string, string> = {
   TokenNotRegistered: "That asset is not registered to this vault.",
   InvalidToken: "That address is not a contract, so it cannot be registered.",
   FeeForwardFailed: "The fee could not be forwarded to the fee recipient.",
+  StaleClaimSignatures:
+    "Another claim used this nonce first. No fee or cooldown was applied; reload the vault and sign again.",
 };
 
 const SKIP_REASONS: Record<string, string> = {

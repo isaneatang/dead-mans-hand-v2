@@ -11,6 +11,10 @@ const config: HardhatUserConfig = {
     },
   },
   networks: {
+    hardhat: {
+      hardfork: "cancun",
+      blockGasLimit: 30_000_000,
+    },
     botTestnet: {
       url: "https://rpc.bohr.life",
       chainId: 968,

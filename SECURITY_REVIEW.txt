@@ -1,0 +1,209 @@
+DEAD MAN'S HAND V2 - SECURITY REVIEW LOG
+========================================
+
+Date: 2026-08-31
+Scope: Contract, frontend, deployment safeguards, and documented residual risks.
+
+DEPLOYMENT STATUS
+-----------------
+
+The security-hardened contract was deployed and source-verified on BOT Chain
+testnet on 2026-08-31 at 0x57DeF08fdafA9Ae9428bCCE440c624CC83B1f6F8.
+Existing vaults, approvals, and EIP-712 signatures from the previous contract
+did not migrate because the verifying contract address is part of the signed
+EIP-712 domain.
+
+IMPLEMENTED HARDENING
+---------------------
+
+1. Low-level token return data is copied only after checking its size, and no
+   more than 32 bytes are copied into contract memory.
+2. Immediately stale, valid previous-nonce signatures revert without charging
+   a fee or applying cooldown during a five-minute race grace period.
+3. Public previous-nonce signatures stop receiving the fee-free exception
+   after the grace period.
+4. The constructor rejects a base fee that could overflow after all configured
+   fee doublings.
+5. The supplied deployment script rejects a fee-recipient address that already
+   contains contract code.
+6. The fixed token-call gas limit is retained to constrain hostile token code.
+7. Phrase mismatch feedback is combined and no longer identifies which phrase
+   matched.
+8. Repeated browser mismatch attempts receive a short local delay.
+9. Browser private-key construction and EIP-712 signing occur inside the crypto
+   worker; private keys are not returned to the main UI thread.
+10. The frontend CSP excludes unsafe-inline and unsafe-eval.
+11. Static-host security headers are provided in frontend/public/_headers.
+12. CLAIMED vault warnings now explain that the vault remains immediately
+    claimable until deactivated and approvals are revoked.
+
+REMAINING SECURITY RISKS
+------------------------
+
+1. Weak or predictable phrases remain the largest practical compromise route.
+   Public signer addresses are offline phrase-verification oracles. Browser
+   throttling does not prevent independent scripted guessing.
+2. A hostile or non-compliant token can report transfer success without
+   changing balances or ownership. DMH sweep events are not independent proof
+   of asset movement; important transfers must be verified on the token
+   contract.
+3. Every fee-bearing claim permanently depends on the immutable fee recipient
+   accepting native BOT. The deployment check is a point-in-time safeguard,
+   not a permanent on-chain guarantee.
+4. Failure fees and cooldowns are caller-scoped. An attacker can use new funded
+   addresses to remain at the base fee, although this does not improve offline
+   phrase guessing and still costs gas and the fee.
+5. The fixed 150,000 gas transfer budget may skip unusually complex legitimate
+   token transfers or ERC-721 receiver hooks. Raising it would increase hostile
+   token gas-griefing capacity.
+6. CLAIMED vaults intentionally remain immediately claimable for follow-up
+   sweeps. Newly received assets from registered contracts remain exposed under
+   surviving approvals until the owner deactivates the vault and revokes them.
+7. JavaScript cannot guarantee physical erasure of phrases or key material.
+   Worker isolation reduces exposure but cannot protect against compromised
+   same-origin code or browser execution.
+8. The response-header file is effective only on hosting platforms that support
+   its format. Other hosts must install equivalent CSP and security headers.
+9. There is no automated browser cryptographic or wallet end-to-end suite.
+10. The implementation has not received an independent professional audit,
+    formal verification, or comprehensive fuzz/invariant testing.
+
+VERIFICATION COMPLETED BEFORE FINAL CONTRACT REVIEW
+---------------------------------------------------
+
+- Solidity compilation passed.
+- Contract, gas-regression, and shared cryptographic tests passed: 31 tests.
+- Frontend TypeScript typecheck passed.
+- Production frontend build passed.
+- Diff whitespace checks passed for implementation files.
+
+FINAL CONTRACT-ONLY REVIEW
+--------------------------
+
+Review result: no critical or high-severity unauthorized asset-drain path was
+found. Both signatures, the destination, vault ID, nonce, chain ID, and
+verifying contract remain bound by EIP-712. State and nonce updates occur
+before external token calls, and the claim entry point remains protected by a
+reentrancy guard.
+
+PRE-REDEPLOYMENT FINDINGS
+-------------------------
+
+M-1. Immutable fee-recipient liveness
+
+Every fee-bearing claim depends on the immutable fee recipient accepting native
+BOT. If that transfer ever rejects, successful and failed claim attempts revert
+before completion. The deployment script's no-code check is only a point-in-time
+safeguard and does not prove control, prevent an address typo, or guarantee
+future acceptance.
+
+Required before redeployment:
+
+- Use a deliberately controlled ordinary EOA.
+- Independently verify the configured address in full.
+- Test native BOT receipt before deployment.
+- Assert the deployed immutable recipient and fee after deployment.
+- Document that this dependency cannot be repaired in an immutable instance.
+
+Testnet disposition: accepted for this deployment. The configured recipient had
+no code and accepted a confirmed 1 wei native BOT transfer before deployment.
+The immutable values were asserted again during the live lifecycle. The
+architectural dependency remains and must be reassessed for any future address.
+
+M-2. Worst-case complete-claim gas
+
+Each registered token call is individually bounded, but a vault may contain 50
+entries. Fifty hostile or expensive ERC-20 entries can consume approximately
+11.5 million callee gas before protocol overhead. A mixed ERC-20/ERC-721 vault
+can also approach practical block or RPC gas limits. Registered entries cannot
+be edited after a vault becomes CLAIMED, so an expensive registry can impair
+follow-up sweeps.
+
+Required before redeployment:
+
+- Measure a complete 50-entry hostile-token claim on BOT Chain testnet.
+- Measure a worst-case mixed ERC-20/ERC-721 claim.
+- Compare measured gas with BOT Chain block and RPC transaction limits.
+- Reduce registry limits or introduce bounded claim pagination if the margin is
+  insufficient.
+
+Testnet disposition: accepted with measured headroom. The BOT testnet block gas
+limit was 35,000,000. A 50-token near-stipend ERC-20 claim used 10,394,058 gas,
+and a mixed 30 ERC-20/20 ERC-721 claim used 7,803,533 gas. Regression tests cap
+both scenarios below 24,000,000 gas. Future chain or gas-schedule changes must
+repeat these measurements.
+
+M-3. Token-reported success is not settlement proof
+
+A malicious token may return success without transferring the requested asset.
+DMH sweep events report successful call semantics, not independently verified
+balance or ownership changes. Operational tooling must verify settlement on the
+token contract. This is documented and is not an authorization bypass.
+
+LOW-SEVERITY AND DESIGN FINDINGS
+--------------------------------
+
+1. Signer addresses are not required on-chain to be EOAs. A misconfigured
+   contract signer may make a vault permanently unclaimable until the owner
+   deactivates it and creates another vault.
+2. Caller-scoped failure penalties can be bypassed with fresh funded accounts.
+3. CLAIMED vaults remain immediately claimable under surviving approvals.
+4. Native BOT forced into the contract cannot be recovered.
+5. Complex legitimate token calls may exceed the fixed 150,000 gas stipend and
+   be skipped.
+6. Token registrations and approvals remain exposed to upgradeable or hostile
+   token implementations.
+
+HARDENING VALIDATED
+-------------------
+
+1. No replay can move assets with an old nonce.
+2. The five-minute stale-signature path only refunds a legitimate immediate
+   race and cannot execute another sweep.
+3. After five minutes, stale public calldata follows the normal fee/cooldown
+   path.
+4. Return-data copy operations are bounded to 32 bytes and do not allocate a
+   dynamic return buffer.
+5. Fee doubling is capped and constructor-bounded against arithmetic overflow.
+6. Reentrancy through ERC-721 receiver hooks remains blocked.
+7. Deactivation remains irreversible and owner-only.
+8. The signed destination prevents a relayer from redirecting a copied claim.
+
+MISSING PRE-PRODUCTION TESTS
+----------------------------
+
+1. Reverting or gas-consuming fee recipient.
+2. Maximum 50-token hostile registry gas measurement.
+3. Maximum mixed ERC-20/ERC-721 registry gas measurement.
+4. ERC-721 receiver near and beyond the transfer gas limit.
+5. Tokens that report success without changing balances or ownership.
+6. Exact stale-grace boundary timestamp.
+7. Multiple successful follow-up claims and signatures older than one nonce.
+8. Forced native BOT behavior.
+9. State-machine, nonce-monotonicity, registry, and liveVaultOf invariant tests.
+10. Post-deployment BOT testnet EIP-712 claim smoke test.
+
+FINAL REDEPLOYMENT DECISION
+---------------------------
+
+The hardened source is deployed for continued testnet use. Production-value use
+is not approved by this review yet. Before handling real value, add the remaining
+adversarial and invariant tests and obtain an independent Solidity audit.
+
+FINAL VERIFICATION
+------------------
+
+- Solidity compilation passed.
+- All contract, gas-regression, and shared cryptographic tests passed: 31 tests.
+- No critical or high-severity unauthorized drain was found.
+- Fee-recipient liveness probe confirmed on chain in transaction
+  0x56a039f9ca8e7a6285f793159e6dd550188d6993390b15ea4c27e92022bab91f.
+- BOT testnet block gas limit measured at 35,000,000 gas.
+- Local 50-token near-stipend claim measured at 10,394,058 gas.
+- Local mixed 30 ERC-20/20 ERC-721 claim measured at 7,803,533 gas.
+- Hardened DMH deployment transaction:
+  0x0bfa3a9dee34de054937f337f2883ca7e112d0f4f8fc8a73e8d32a7ff5435682.
+- Source verification completed on BOT Blockscout.
+- Hardened vault 2 completed a full live claim in transaction
+  0xc58fcc447eec27713d9b58c61df61520ab16f7a60088228f022815c0a6eda940.
+- The validation vault was deactivated and its remaining NFT approval revoked.

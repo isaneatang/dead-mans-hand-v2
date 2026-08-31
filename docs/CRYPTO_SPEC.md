@@ -65,5 +65,5 @@ Both phrase-derived keys sign the same typed data. The nonce is read immediately
 ## Memory And Transport
 
 - Never send phrases or private keys through RPC, fetch, XHR, analytics, logs, browser storage, cookies, URLs, or wallet transaction calldata.
-- Derivation and signing occur in local memory.
+- Frontend private-key derivation, public-address derivation, and signing occur inside a dedicated web worker. Private keys are not returned to the main UI thread; only public addresses and signatures are returned.
 - Drop references immediately after use. JavaScript garbage collection does not guarantee physical memory erasure.

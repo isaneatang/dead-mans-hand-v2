@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { formatUnits, isAddress, getAddress, parseUnits, type Log } from "ethers";
 import {
   createVaultSalt,
@@ -147,6 +147,19 @@ function Notice({ text, tone = "warn" }: { text: string; tone?: "warn" | "good" 
     <p className={tone === "good" ? "notice good" : "notice"} role="status">
       {text}
     </p>
+  );
+}
+
+function ClaimedWarning() {
+  return (
+    <div className="claimed-warning" role="alert">
+      <strong>CLAIMED does not mean closed.</strong>
+      <span>
+        This vault remains immediately claimable and cannot be pinged. Newly received assets from
+        registered contracts can be swept under existing approvals without another waiting period.
+        Deactivate the vault and revoke every approval to stop future sweeps.
+      </span>
+    </div>
   );
 }
 
@@ -919,6 +932,7 @@ function VaultCard({ id, wallet }: { id: bigint; wallet: WalletState }) {
       <p className="muted mono">
         nonce {vault.nonce.toString()} · period {formatDuration(Number(vault.inactivityPeriod))}
       </p>
+      {vault.state === 1 && <ClaimedWarning />}
       <div className="actions">
         <button className="secondary" disabled={busy || vault.state !== 0} onClick={() => act("ping")}>
           Ping now
@@ -997,6 +1011,9 @@ function Claim({ wallet, ready }: { wallet?: WalletState; ready: boolean }) {
   const [verified, setVerified] = useState(false);
   const [fee, setFee] = useState<bigint>();
   const [cooldownUntil, setCooldownUntil] = useState(0);
+  const [localThrottleUntil, setLocalThrottleUntil] = useState(0);
+  const localFailuresRef = useRef(0);
+  const claimStartedRef = useRef(false);
   const [rows, setRows] = useState<SweepRow[]>();
   const [outcome, setOutcome] = useState<"none" | "success" | "rejected">("none");
   const [txHash, setTxHash] = useState("");
@@ -1028,6 +1045,10 @@ function Claim({ wallet, ready }: { wallet?: WalletState; ready: boolean }) {
     setOutcome("none");
     try {
       const id = BigInt(idText.trim());
+      if (vault?.id !== id) {
+        localFailuresRef.current = 0;
+        setLocalThrottleUntil(0);
+      }
       setVault({ id, data: toVault(await dmh().getVault(id)) });
     } catch (error) {
       setVault(undefined);
@@ -1038,11 +1059,19 @@ function Claim({ wallet, ready }: { wallet?: WalletState; ready: boolean }) {
   }
 
   async function claim() {
+    if (claimStartedRef.current) return;
     if (!vault) return;
     if (!wallet || !ready) return setNotice("Connect a funded BOT testnet wallet to submit.");
     if (!isAddress(destination)) return setNotice("Enter a valid destination address.");
     if (!verified) return setNotice("Confirm that you checked the destination address.");
+    if (!normalizePhrase(phraseA) || !normalizePhrase(phraseB)) {
+      return setNotice("Enter both phrases before checking this combination.");
+    }
+    if (localThrottleUntil > now) {
+      return setNotice(`Wait ${formatDuration(localThrottleUntil - now)} before checking again.`);
+    }
 
+    claimStartedRef.current = true;
     setBusy(true);
     setRows(undefined);
     setOutcome("none");
@@ -1085,12 +1114,20 @@ function Claim({ wallet, ready }: { wallet?: WalletState; ready: boolean }) {
       const okA = first.address.toLowerCase() === fresh.signerA.toLowerCase();
       const okB = second.address.toLowerCase() === fresh.signerB.toLowerCase();
       if (!okA || !okB) {
-        const which = !okA && !okB ? "Both phrases do" : !okA ? "Phrase A does" : "Phrase B does";
+        const nextFailures = localFailuresRef.current + 1;
+        localFailuresRef.current = nextFailures;
+        const delay = nextFailures >= 3 ? Math.min(30, (nextFailures - 2) * 5) : 0;
+        if (delay > 0) setLocalThrottleUntil(Math.floor(Date.now() / 1000) + delay);
         setNotice(
-          `${which} not match this vault yet. Nothing was submitted and no fee was spent. Check spacing, line breaks and capitalisation.`,
+          `This combination does not match the vault. Nothing was submitted and no fee was spent. Check spacing, line breaks and capitalization in both entries.${
+            delay > 0 ? ` Wait ${delay} seconds before checking again.` : ""
+          }`,
         );
         return;
       }
+
+      localFailuresRef.current = 0;
+      setLocalThrottleUntil(0);
 
       const requiredFee = BigInt(await dmh().currentClaimFee(vault.id, wallet.address));
       setFee(requiredFee);
@@ -1160,6 +1197,7 @@ function Claim({ wallet, ready }: { wallet?: WalletState; ready: boolean }) {
     } catch (error) {
       setNotice(friendlyError(error));
     } finally {
+      claimStartedRef.current = false;
       setBusy(false);
     }
   }
@@ -1168,6 +1206,7 @@ function Claim({ wallet, ready }: { wallet?: WalletState; ready: boolean }) {
   const remaining = deadline - now;
   const claimable = Boolean(vault) && vault!.data.state !== 2 && remaining <= 0;
   const cooling = cooldownUntil > now;
+  const localCooling = localThrottleUntil > now;
 
   return (
     <main className="flow narrow">
@@ -1204,6 +1243,7 @@ function Claim({ wallet, ready }: { wallet?: WalletState; ready: boolean }) {
             </span>
           </div>
           <p className="muted mono">owner {short(vault.data.owner)}</p>
+          {vault.data.state === 1 && <ClaimedWarning />}
           <p className="countdown">
             {vault.data.state === 2
               ? "Deactivated — this vault can never be claimed"
@@ -1245,8 +1285,12 @@ function Claim({ wallet, ready }: { wallet?: WalletState; ready: boolean }) {
                   : `Fee for this wallet: ${formatUnits(fee, 18)} BOT`}
                 {cooling && ` · cooldown ends in ${formatDuration(cooldownUntil - now)}`}
               </p>
-              <button className="primary" disabled={busy || cooling} onClick={claim}>
-                {busy ? "Deriving and submitting…" : "Sign both phrases and claim"}
+              <button className="primary" disabled={busy || cooling || localCooling} onClick={claim}>
+                {busy
+                  ? "Deriving and submitting…"
+                  : localCooling
+                    ? `Local check available in ${formatDuration(localThrottleUntil - now)}`
+                    : "Sign both phrases and claim"}
               </button>
             </>
           )}
@@ -1366,6 +1410,7 @@ function Inspect() {
               {STATE_LABEL[vault.data.state]}
             </span>
           </div>
+          {vault.data.state === 1 && <ClaimedWarning />}
           <p className="countdown">
             {vault.data.state === 2
               ? "Deactivated"

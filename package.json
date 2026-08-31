@@ -12,7 +12,9 @@
     "typecheck": "tsc -p frontend/tsconfig.json",
     "preview": "vite preview --config frontend/vite.config.ts",
     "deploy:testnet": "hardhat run scripts/deploy.ts --network botTestnet",
+    "preflight:testnet": "hardhat run scripts/preflight.ts --network botTestnet",
     "validate:testnet": "hardhat run scripts/live-cycle.ts --network botTestnet",
+    "cleanup:testnet": "hardhat run scripts/cleanup-validation.ts --network botTestnet",
     "clean": "hardhat clean"
   },
   "dependencies": {

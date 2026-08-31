@@ -272,6 +272,17 @@ button:disabled { opacity: 0.4; cursor: not-allowed; transform: none !important;
   background: rgba(255, 170, 165, 0.05);
 }
 .notice.good { border-left-color: var(--dmh-success); background: rgba(142, 224, 162, 0.06); }
+.claimed-warning {
+  border: 1px solid var(--dmh-danger);
+  background: rgba(255, 170, 165, 0.09);
+  color: var(--dmh-ink);
+  padding: 16px;
+  display: grid;
+  gap: 7px;
+  font-size: 14px;
+  line-height: 1.55;
+}
+.claimed-warning strong { color: var(--dmh-danger); font: 13px ui-monospace, monospace; }
 
 /* beneficiary sheet */
 .sheet dl { display: grid; grid-template-columns: auto 1fr; gap: 8px 18px; margin: 0; color: var(--dmh-muted); font-size: 13px; }

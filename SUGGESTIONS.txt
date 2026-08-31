@@ -3,7 +3,8 @@ DEAD MAN'S HAND v2 - SECURITY REVIEW SUGGESTIONS
 ================================================================================
 
 Source reviewed: contracts/DeadMansHandV2.sol (517 lines)
-Deployed at:     0x2560Ad3B98bbF47d6c1A5A36ebC557F8e3d64f00 (BOT testnet 968)
+Original review: 0x2560Ad3B98bbF47d6c1A5A36ebC557F8e3d64f00 (superseded)
+Hardened at:    0x57DeF08fdafA9Ae9428bCCE440c624CC83B1f6F8 (BOT testnet 968)
 Review type:     Manual code review by an AI assistant.
                  This is NOT a professional audit and must not be treated as one.
 
@@ -221,6 +222,41 @@ NOT RECOMMENDED
     a security property.
   - Do NOT weaken the uniform failure path to report which signature failed.
     That would create the side channel the design deliberately avoids.
+
+--------------------------------------------------------------------------------
+ADDITIONAL FRONTEND PHRASE-FEEDBACK SUGGESTION
+--------------------------------------------------------------------------------
+
+Frontend-only implementation notes
+
+
+This change is frontend-only and does not alter the contract or cryptographic specification.
+
+WHAT CHANGES
+
+1. Merge the two phrase checks into one combined check
+- Don't derive and validate Phrase A's address the moment it's typed, separately from Phrase B.
+- Wait until both fields have values, then check both together, report a single pass/fail.
+
+2. Generic failure message — remove all specificity
+- Delete: "Phrase A does not match this vault yet."
+- Replace with something like: "This combination doesn't match the vault. Check spacing, line breaks, and capitalization on both phrases."
+- Never say which phrase, never say "phrase A" or "phrase B" by name in any error state.
+
+3. Generic success message — don't reveal partial progress either
+
+- Don't show any "✓ Phrase A matches" indicator while the user is still typing Phrase B, even as a positive signal — that's still leaking which one is correct in isolation, just from the other direction.
+- Only ever show a result once both are entered and checked as a pair.
+
+4. Optional hardening: light client-side throttling
+- After a few failed combined-check attempts in a row, add a short delay (a few seconds) before allowing another local check — raises friction for manual guessing directly in the browser, without needing a wallet connection or on-chain transaction. Doesn't stop a scripted attacker bypassing the UI, but does stop casual/manual guessing by someone just poking at the website.
+
+WHAT DOES NOT CHANGE
+- The contract — untouched, this was never a contract bug.
+- The KDF, salt, derivation logic — untouched.
+- The actual claim submission flow (signing + attemptClaim) — untouched, this only affects the pre-flight local check shown before submission.
+
+This is a self-contained frontend fix. It needs no contract redeployment or new EIP-712 domain.
 
 ================================================================================
 END OF SUGGESTIONS

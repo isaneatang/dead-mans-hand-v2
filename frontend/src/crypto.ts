@@ -1,5 +1,3 @@
-import { Wallet } from "ethers";
-
 export type DerivationInput = {
   phrase: string;
   owner: string;
@@ -14,15 +12,20 @@ const worker = new Worker(new URL("./crypto.worker.ts", import.meta.url), {
 
 const pending = new Map<
   string,
-  { resolve: (key: string) => void; reject: (error: Error) => void }
+  {
+    resolve: (result: CryptoResult) => void;
+    reject: (error: Error) => void;
+  }
 >();
+
+type CryptoResult = { address: string; signature?: string };
 
 worker.onmessage = ({ data }) => {
   const request = pending.get(data.id);
   if (!request) return;
   pending.delete(data.id);
   if (data.error) request.reject(new Error(data.error));
-  else request.resolve(data.privateKey);
+  else request.resolve({ address: data.address, signature: data.signature });
 };
 
 worker.onerror = () => {
@@ -37,29 +40,25 @@ function requestId(): string {
   return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }
 
-function derivePrivateKey(input: DerivationInput): Promise<string> {
+function runWorker(
+  input: DerivationInput,
+  operation: "address" | "signClaim",
+  claim?: {
+    contractAddress: string;
+    vaultId: bigint;
+    destination: string;
+    nonce: bigint;
+  },
+): Promise<CryptoResult> {
   const id = requestId();
   return new Promise((resolve, reject) => {
     pending.set(id, { resolve, reject });
-    worker.postMessage({ id, ...input });
+    worker.postMessage({ id, operation, ...input, ...claim });
   });
 }
 
-const CLAIM_TYPES = {
-  ClaimAuthorization: [
-    { name: "vaultId", type: "uint256" },
-    { name: "destination", type: "address" },
-    { name: "nonce", type: "uint256" },
-  ],
-};
-
 export async function derivePublicAddress(input: DerivationInput): Promise<string> {
-  let privateKey = await derivePrivateKey(input);
-  try {
-    return new Wallet(privateKey).address;
-  } finally {
-    privateKey = "";
-  }
+  return (await runWorker(input, "address")).address;
 }
 
 /**
@@ -73,23 +72,14 @@ export async function deriveAndSignClaim(
   destination: string,
   nonce: bigint,
 ): Promise<{ address: string; signature: string }> {
-  let privateKey = await derivePrivateKey(input);
-  try {
-    const wallet = new Wallet(privateKey);
-    const signature = await wallet.signTypedData(
-      {
-        name: "DeadMansHandV2",
-        version: "2",
-        chainId: input.chainId,
-        verifyingContract: contractAddress,
-      },
-      CLAIM_TYPES,
-      { vaultId, destination, nonce },
-    );
-    return { address: wallet.address, signature };
-  } finally {
-    privateKey = "";
-  }
+  const result = await runWorker(input, "signClaim", {
+    contractAddress,
+    vaultId,
+    destination,
+    nonce,
+  });
+  if (!result.signature) throw new Error("Local claim signing failed in this browser.");
+  return { address: result.address, signature: result.signature };
 }
 
 export function createVaultSalt(): string {
